@@ -1,0 +1,21 @@
+import { envConfig } from "./env.config.js";
+
+export const dbConfig = {
+  HOST: envConfig.DATABASE_CREDENTIALS.HOST,
+  USER: envConfig.DATABASE_CREDENTIALS.USER,
+  PASSWORD: envConfig.DATABASE_CREDENTIALS.PASSWORD,
+  DB: envConfig.DATABASE_CREDENTIALS.DB,
+  PORT: envConfig.DATABASE_CREDENTIALS.PORT,
+  DIALECT: envConfig.DATABASE_CREDENTIALS.DIALECT,
+  pool: {
+    max: 10,
+    min: 0,
+    acquire: 30000,
+    idle: 10000,
+  },
+  HOST_FIRST_NAME: envConfig.HOST_CREDENTIALS.FIRST_NAME,
+  HOST_LAST_NAME: envConfig.HOST_CREDENTIALS.LAST_NAME,
+  HOST_EMAIL: envConfig.HOST_CREDENTIALS.EMAIL,
+  HOST_ROLE: envConfig.HOST_CREDENTIALS.ROLE,
+  HOST_PASSWORD: envConfig.HOST_CREDENTIALS.PASSWORD,
+};
