@@ -112,7 +112,7 @@ export const OrganizationModel = (sequelize, DataTypes) => {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
       },
-      isDeleted: {
+      is_deleted: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
       },
@@ -121,6 +121,7 @@ export const OrganizationModel = (sequelize, DataTypes) => {
       tableName: "organizations",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
     },
   );
 

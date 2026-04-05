@@ -39,6 +39,7 @@ export const PlanModel = (sequelize, DataTypes) => {
       tableName: "plans",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
     },
   );
 

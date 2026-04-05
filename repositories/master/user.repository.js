@@ -6,7 +6,7 @@ import { masterDb } from "../../models/index.js";
 export const getAllUsers = async (filters = {}) => {
   const { search, skip = 0, limit = 10, is_active, role_id } = filters;
 
-  const where = { isDeleted: false };
+  const where = { is_deleted: false };
 
   if (search) {
     where[Op.or] = [
@@ -33,7 +33,7 @@ export const getAllUsers = async (filters = {}) => {
     },
     offset: parseInt(skip),
     limit: parseInt(limit),
-    order: [["createdAt", "DESC"]], // ✅ FIXED: camelCase — models use timestamps:true without underscored:true
+    order: [["created_at", "DESC"]], // ✅ FIXED: snake_case — models use underscored:true
     include: [
       {
         model: masterDb.MasterRole,
@@ -53,7 +53,7 @@ export const getAllUsers = async (filters = {}) => {
 
 export const getUserById = async (id) => {
   return masterDb.MasterUser.findOne({
-    where: { id, isDeleted: false },
+    where: { id, is_deleted: false },
     attributes: {
       exclude: [
         "password",
@@ -73,7 +73,7 @@ export const getUserById = async (id) => {
 
 export const getUserByEmail = async (email) => {
   return masterDb.MasterUser.findOne({
-    where: { email: email.toLowerCase(), isDeleted: false },
+    where: { email: email.toLowerCase(), is_deleted: false },
   });
 };
 
@@ -88,7 +88,7 @@ export const updateUser = async (id, data) => {
 
 export const deleteUser = async (id) => {
   await masterDb.MasterUser.update(
-    { is_active: false, isDeleted: true },
+    { is_active: false, is_deleted: true },
     { where: { id } },
   );
   return getUserById(id);

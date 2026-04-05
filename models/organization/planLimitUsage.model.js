@@ -44,6 +44,7 @@ export const PlanLimitUsageModel = (sequelize, DataTypes, options = {}) => {
       tableName: "plan_limit_usage",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
       indexes: [
         {
           unique: true,

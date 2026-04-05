@@ -8,7 +8,7 @@ import { masterDb, initTenantModels } from "../../models/index.js";
  */
 export const findOrgByDomain = async (domain) => {
   return await masterDb.Organization.findOne({
-    where: { domain: domain.toLowerCase(), is_active: true, isDeleted: false },
+    where: { domain: domain.toLowerCase(), is_active: true, is_deleted: false },
     attributes: [
       "id",
       "schema_name",
@@ -28,7 +28,7 @@ export const findOrgByDomain = async (domain) => {
  */
 export const findMasterUserByEmail = async (email) => {
   return await masterDb.MasterUser.findOne({
-    where: { email: email.toLowerCase(), isDeleted: false },
+    where: { email: email.toLowerCase(), is_deleted: false },
     include: [
       {
         model: masterDb.MasterRole,
@@ -61,7 +61,7 @@ export const findOrgUserByEmail = async (email, schema) => {
  */
 export const findMasterUserById = async (userId) => {
   return await masterDb.MasterUser.findOne({
-    where: { id: userId, isDeleted: false },
+    where: { id: userId, is_deleted: false },
     attributes: {
       exclude: [
         "password",
@@ -209,7 +209,7 @@ export const findMasterUserByResetToken = async (hashedToken) => {
     where: {
       password_reset_token: hashedToken,
       password_reset_expires_at: { [Op.gt]: new Date() },
-      isDeleted: false,
+      is_deleted: false,
     },
   });
 };

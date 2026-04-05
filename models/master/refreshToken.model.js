@@ -64,6 +64,7 @@ export const RefreshTokenModel = (sequelize, DataTypes) => {
       tableName: "refresh_tokens",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
       indexes: [
         { unique: true, fields: ["token"] },
         { fields: ["user_id", "user_type"] },

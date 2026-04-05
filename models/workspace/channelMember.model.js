@@ -24,6 +24,7 @@ export const ChannelMemberModel = (sequelize, DataTypes, options = {}) => {
       tableName: "channel_members",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
       indexes: [
         {
           unique: true,

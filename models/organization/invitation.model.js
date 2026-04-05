@@ -58,6 +58,7 @@ export const InvitationModel = (sequelize, DataTypes, options = {}) => {
       tableName: "invitations",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
       indexes: [{ fields: ["token"] }, { fields: ["status"] }],
     },
   );

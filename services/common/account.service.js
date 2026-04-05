@@ -26,7 +26,7 @@ export const getProfile = async ({ userId, tenantSchema }) => {
  */
 export const updateProfile = async ({ userId, tenantSchema, data }) => {
   // Prevent sensitive fields from being updated via this endpoint
-  const { password, role_id, is_active, isDeleted, ...safeData } = data;
+  const { password, role_id, is_active, is_deleted, ...safeData } = data;
 
   const updated = tenantSchema
     ? await AccountRepository.updateOrgUserProfile(

@@ -24,6 +24,7 @@ export const PlanLimitModel = (sequelize, DataTypes) => {
       tableName: "plan_limits",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
       indexes: [{ unique: true, fields: ["plan_id", "limit_key"] }],
     },
   );

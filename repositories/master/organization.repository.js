@@ -13,7 +13,7 @@ export const getAllOrganizations = async (filters = {}) => {
     plan_id,
   } = filters;
 
-  const where = { isDeleted: false }; // ✅ Organization model HAS isDeleted — keep it
+  const where = { is_deleted: false }; // ✅ Organization model HAS is_deleted — keep it
 
   if (search) {
     where[Op.or] = [
@@ -41,7 +41,7 @@ export const getAllOrganizations = async (filters = {}) => {
     ],
     offset: parseInt(skip),
     limit: parseInt(limit),
-    order: [["createdAt", "DESC"]], // ✅ FIXED: camelCase — no underscored:true on model
+    order: [["created_at", "DESC"]], // ✅ FIXED: snake_case — models use underscored:true
   });
 
   return {
@@ -54,7 +54,7 @@ export const getAllOrganizations = async (filters = {}) => {
 
 export const getOrganizationById = async (id) => {
   return masterDb.Organization.findOne({
-    where: { id, isDeleted: false },
+    where: { id, is_deleted: false },
     include: [
       {
         model: masterDb.Plan,
@@ -66,7 +66,7 @@ export const getOrganizationById = async (id) => {
 
 export const getOrganizationByDomain = async (domain) => {
   return masterDb.Organization.findOne({
-    where: { domain: domain.toLowerCase(), isDeleted: false },
+    where: { domain: domain.toLowerCase(), is_deleted: false },
   });
 };
 
@@ -91,7 +91,7 @@ export const deactivateOrganization = async (id) => {
 
 export const deleteOrganization = async (id) => {
   await masterDb.Organization.update(
-    { is_active: false, isDeleted: true },
+    { is_active: false, is_deleted: true },
     { where: { id } },
   );
   return getOrganizationById(id);

@@ -34,6 +34,7 @@ export const ChannelModel = (sequelize, DataTypes, options = {}) => {
       tableName: "channels",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
     },
   );
 

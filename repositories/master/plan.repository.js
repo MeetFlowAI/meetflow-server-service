@@ -26,7 +26,7 @@ export const getAllPlans = async (filters = {}) => {
     where,
     offset: parseInt(skip),
     limit: parseInt(limit),
-    order: [["createdAt", "DESC"]], // ✅ FIXED: camelCase — no underscored:true on model
+    order: [["created_at", "DESC"]], // ✅ FIXED: snake_case — models use underscored:true
   });
 
   return {

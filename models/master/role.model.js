@@ -23,6 +23,7 @@ export const MasterRoleModel = (sequelize, DataTypes) => {
       tableName: "roles",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
     },
   );
 

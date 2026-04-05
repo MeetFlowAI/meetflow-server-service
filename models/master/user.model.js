@@ -53,7 +53,7 @@ export const MasterUserModel = (sequelize, DataTypes) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
-      isDeleted: {
+      is_deleted: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
       },
@@ -62,6 +62,7 @@ export const MasterUserModel = (sequelize, DataTypes) => {
       tableName: "master_users",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
     },
   );
 

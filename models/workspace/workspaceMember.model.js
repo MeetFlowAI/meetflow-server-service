@@ -29,6 +29,7 @@ export const WorkspaceMemberModel = (sequelize, DataTypes, options = {}) => {
       tableName: "workspace_members",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
       indexes: [
         {
           unique: true,

@@ -7,7 +7,7 @@ import { masterDb, initTenantModels } from "../../models/index.js";
  */
 export const getMasterUserProfile = async (userId) => {
   return masterDb.MasterUser.findOne({
-    where: { id: userId, isDeleted: false },
+    where: { id: userId, is_deleted: false },
     attributes: {
       exclude: [
         "password",
@@ -71,7 +71,7 @@ export const updateOrgUserProfile = async (userId, data, schema) => {
  */
 export const getMasterUserPassword = async (userId) => {
   return masterDb.MasterUser.findOne({
-    where: { id: userId, isDeleted: false },
+    where: { id: userId, is_deleted: false },
     attributes: ["id", "password"],
   });
 };

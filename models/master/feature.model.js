@@ -29,6 +29,7 @@ export const FeatureModel = (sequelize, DataTypes) => {
       tableName: "features",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
     },
   );
 

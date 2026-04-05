@@ -24,6 +24,7 @@ export const PlanFeatureModel = (sequelize, DataTypes) => {
       tableName: "plan_features",
       schema: "master_tenant",
       timestamps: true,
+      underscored: true,
       indexes: [{ unique: true, fields: ["plan_id", "feature_id"] }],
     },
   );

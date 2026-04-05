@@ -14,7 +14,7 @@ export const getFeaturesByPlan = async (planId, filters = {}) => {
     // The raw PlanFeature rows (plan_id, feature_id, is_active) are sufficient here.
     offset: parseInt(skip),
     limit: parseInt(limit),
-    order: [["createdAt", "DESC"]], // ✅ FIXED: camelCase — no underscored:true on model
+    order: [["created_at", "DESC"]], // ✅ FIXED: snake_case — models use underscored:true
   });
 
   return {

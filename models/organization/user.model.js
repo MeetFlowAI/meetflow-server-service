@@ -74,6 +74,7 @@ export const UserModel = (sequelize, DataTypes, options = {}) => {
       tableName: "users",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
     },
   );
 

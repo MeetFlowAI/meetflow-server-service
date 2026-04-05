@@ -32,6 +32,7 @@ export const WorkspaceModel = (sequelize, DataTypes, options = {}) => {
       tableName: "workspaces",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
     },
   );
 

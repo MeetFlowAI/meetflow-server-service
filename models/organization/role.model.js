@@ -27,6 +27,7 @@ export const RoleModel = (sequelize, DataTypes, options = {}) => {
       tableName: "roles",
       schema: options.schema,
       timestamps: true,
+      underscored: true,
     },
   );
 

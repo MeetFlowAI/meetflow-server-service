@@ -388,10 +388,10 @@ components:
         is_system:
           type: boolean
           example: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        updatedAt:
+        updated_at:
           type: string
           format: date-time
 
@@ -450,10 +450,10 @@ components:
           type: string
           format: date-time
           nullable: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        updatedAt:
+        updated_at:
           type: string
           format: date-time
 
@@ -532,10 +532,10 @@ components:
         is_active:
           type: boolean
           example: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        updatedAt:
+        updated_at:
           type: string
           format: date-time
 
@@ -606,10 +606,10 @@ components:
         is_active:
           type: boolean
           example: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        updatedAt:
+        updated_at:
           type: string
           format: date-time
 
@@ -669,7 +669,7 @@ components:
         is_active:
           type: boolean
           example: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
 
@@ -720,7 +720,7 @@ components:
           format: int64
           example: 50
           description: Set to 9999 to represent "Unlimited" in the UI.
-        createdAt:
+        created_at:
           type: string
           format: date-time
 
@@ -834,10 +834,10 @@ components:
         is_active:
           type: boolean
           example: true
-        createdAt:
+        created_at:
           type: string
           format: date-time
-        updatedAt:
+        updated_at:
           type: string
           format: date-time
 
