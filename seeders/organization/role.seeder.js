@@ -1,4 +1,4 @@
-import { USER_ROLES } from "../../constants/index.js";
+import { USER_ROLES, USER_ROLES_DISPLAY_NAME } from "../../constants/index.js";
 
 /**
  * Seeds the 3 default roles into a freshly provisioned tenant schema.
@@ -13,17 +13,21 @@ export const seedOrgRoles = async (tenantDb) => {
   const roles = [
     {
       name: USER_ROLES.ORGANIZATION.ORGANIZATION_SUPER_ADMIN,
+      display_name:
+        USER_ROLES_DISPLAY_NAME.ORGANIZATION.ORGANIZATION_SUPER_ADMIN,
       description:
         "Full control over the organisation — billing, members, settings.",
       is_system: true,
     },
     {
       name: USER_ROLES.ORGANIZATION.ORGANIZATION_ADMIN,
+      display_name: USER_ROLES_DISPLAY_NAME.ORGANIZATION.ORGANIZATION_ADMIN,
       description: "Can manage members, workspaces and channels.",
       is_system: true,
     },
     {
       name: USER_ROLES.ORGANIZATION.ORGANIZATION_MEMBER,
+      display_name: USER_ROLES_DISPLAY_NAME.ORGANIZATION.ORGANIZATION_MEMBER,
       description: "Standard organisation member.",
       is_system: true,
     },

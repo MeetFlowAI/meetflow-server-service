@@ -7,6 +7,7 @@ const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
   dialect: dbConfig.DIALECT,
   port: dbConfig.PORT,
   logging: false,
+  ...(dbConfig.dialectOptions && { dialectOptions: dbConfig.dialectOptions }),
   pool: {
     max: dbConfig.pool.max,
     min: dbConfig.pool.min,
@@ -36,6 +37,8 @@ import WorkspaceModel from "./workspace/workspace.model.js";
 import WorkspaceMemberModel from "./workspace/workspaceMember.model.js";
 import ChannelModel from "./workspace/channel.model.js";
 import ChannelMemberModel from "./workspace/channelMember.model.js";
+import MeetingModel from "./workspace/meeting.model.js";
+import MeetingParticipantModel from "./workspace/meetingParticipant.model.js";
 
 import { runMasterSeeders } from "../seeders/index.js";
 
@@ -64,11 +67,11 @@ const applyMasterAssociations = () => {
   } = masterDb;
 
   // User ↔ Role
-  MasterUser.belongsTo(MasterRole, { foreignKey: "role_id", as: "MasterRole" });
+  MasterUser.belongsTo(MasterRole, { foreignKey: "role_id", as: "role" });
   MasterRole.hasMany(MasterUser, { foreignKey: "role_id" });
 
   // Organization ↔ Plan
-  Organization.belongsTo(Plan, { foreignKey: "plan_id" });
+  Organization.belongsTo(Plan, { foreignKey: "plan_id", as: "plan" });
   Plan.hasMany(Organization, { foreignKey: "plan_id" });
 
   // Plan ↔ Feature (M:N)
@@ -83,8 +86,8 @@ const applyMasterAssociations = () => {
   PlanLimit.belongsTo(Plan, { foreignKey: "plan_id" });
 
   // User ↔ Refresh Token
-  MasterUser.hasMany(RefreshToken, { foreignKey: "user_id" });
-  RefreshToken.belongsTo(MasterUser, { foreignKey: "user_id" });
+  // MasterUser.hasMany(RefreshToken, { foreignKey: "user_id" });
+  // RefreshToken.belongsTo(MasterUser, { foreignKey: "user_id" });
 };
 
 // Apply master associations
@@ -118,6 +121,12 @@ const initTenantModels = (schema) => {
   );
   tenantDb.Channel = ChannelModel(sequelize, DataTypes, options);
   tenantDb.ChannelMember = ChannelMemberModel(sequelize, DataTypes, options);
+  tenantDb.Meeting = MeetingModel(sequelize, DataTypes, options);
+  tenantDb.MeetingParticipant = MeetingParticipantModel(
+    sequelize,
+    DataTypes,
+    options,
+  );
 
   // Apply tenant associations
   applyTenantAssociations(tenantDb);
@@ -132,23 +141,30 @@ const applyTenantAssociations = (db) => {
   const {
     Role,
     User,
+    Invitation,
     Workspace,
     WorkspaceMember,
     Channel,
     ChannelMember,
     PlanLimitUsage,
+    Meeting,
+    MeetingParticipant,
   } = db;
 
   // User ↔ Role
-  User.belongsTo(Role, { foreignKey: "role_id", as: "Role" });
+  User.belongsTo(Role, { foreignKey: "role_id", as: "role" });
   Role.hasMany(User, { foreignKey: "role_id" });
+
+  // Invitation → invited by User
+  Invitation.belongsTo(User, { foreignKey: "invited_by_id", as: "invitedBy" });
+  User.hasMany(Invitation, { foreignKey: "invited_by_id" });
 
   // Workspace → Plan Limit Usage
   Workspace.hasMany(PlanLimitUsage, { foreignKey: "workspace_id" });
   PlanLimitUsage.belongsTo(Workspace, { foreignKey: "workspace_id" });
 
   // Workspace → Creator
-  Workspace.belongsTo(User, { foreignKey: "created_by_id", as: "Creator" });
+  Workspace.belongsTo(User, { foreignKey: "created_by_id", as: "creator" });
 
   // Workspace ↔ Users (M:N)
   Workspace.belongsToMany(User, {
@@ -159,6 +175,10 @@ const applyTenantAssociations = (db) => {
     through: WorkspaceMember,
     foreignKey: "user_id",
   });
+
+  // WorkspaceMember → User (direct, for include with alias)
+  WorkspaceMember.belongsTo(User, { foreignKey: "user_id", as: "member" });
+  User.hasMany(WorkspaceMember, { foreignKey: "user_id" });
 
   // Channel → Workspace
   Channel.belongsTo(Workspace, { foreignKey: "workspace_id" });
@@ -173,6 +193,33 @@ const applyTenantAssociations = (db) => {
     through: ChannelMember,
     foreignKey: "user_id",
   });
+
+  // ChannelMember → User (direct, for include with alias)
+  ChannelMember.belongsTo(User, { foreignKey: "user_id", as: "channelUser" });
+  User.hasMany(ChannelMember, { foreignKey: "user_id" });
+
+  // Meeting → Channel
+  Meeting.belongsTo(Channel, { foreignKey: "channel_id" });
+  Channel.hasMany(Meeting, { foreignKey: "channel_id" });
+
+  // Meeting → Workspace
+  Meeting.belongsTo(Workspace, { foreignKey: "workspace_id" });
+  Workspace.hasMany(Meeting, { foreignKey: "workspace_id" });
+
+  // Meeting → User (host/started_by)
+  Meeting.belongsTo(User, { foreignKey: "started_by_id", as: "host" });
+  User.hasMany(Meeting, { foreignKey: "started_by_id" });
+
+  // MeetingParticipant → Meeting
+  MeetingParticipant.belongsTo(Meeting, { foreignKey: "meeting_id" });
+  Meeting.hasMany(MeetingParticipant, { foreignKey: "meeting_id" });
+
+  // MeetingParticipant → User
+  MeetingParticipant.belongsTo(User, {
+    foreignKey: "user_id",
+    as: "participant",
+  });
+  User.hasMany(MeetingParticipant, { foreignKey: "user_id" });
 };
 
 // ===============================================================
@@ -205,6 +252,10 @@ const provisionTenantSchema = async (schemaName) => {
   await tenantDb.WorkspaceMember.sync({ alter: true, ...syncOptions });
   await tenantDb.Channel.sync({ alter: true, ...syncOptions });
   await tenantDb.ChannelMember.sync({ alter: true, ...syncOptions });
+
+  // Meeting must sync AFTER Channel and Workspace (foreign keys)
+  await tenantDb.Meeting.sync({ alter: true, ...syncOptions });
+  await tenantDb.MeetingParticipant.sync({ alter: true, ...syncOptions });
 
   console.log(`✅ Tables synced for tenant: ${schemaName}`);
 

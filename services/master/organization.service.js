@@ -55,6 +55,7 @@ export const getAllOrganizations = async (filters) => {
   try {
     return await OrganizationRepository.getAllOrganizations(filters);
   } catch (err) {
+    console.log("error:", error);
     throw {
       statusCode: 500,
       message: "Failed to fetch organizations",
@@ -200,10 +201,7 @@ export const createOrganization = async (data) => {
       schemaName: schema_name,
       planName: plan.name,
     }).catch((err) =>
-      console.error(
-        "⚠️  Official org email failed (non-fatal):",
-        err.message,
-      ),
+      console.error("⚠️  Official org email failed (non-fatal):", err.message),
     );
 
     sendOwnerWelcomeEmail({

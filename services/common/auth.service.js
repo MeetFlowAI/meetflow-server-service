@@ -105,13 +105,15 @@ export const login = async ({
     userId: user.id,
     userType, // "master" or schema_name
     tenantSchema, // null for master, schema_name for org
-    role: user.MasterRole?.name || user.Role?.name || null,
+    role: user.MasterRole?.name || user.role?.name || null,
   };
 
   const { accessToken, refreshToken, refreshExpiresAt } = generateTokens(
     tokenPayload,
     rememberMe,
   );
+
+  console.log("user is here:", user);
 
   // Persist refresh token
   await AuthRepository.storeRefreshToken({
@@ -139,7 +141,7 @@ export const login = async ({
       first_name: user.first_name,
       last_name: user.last_name,
       email: user.email,
-      role: user.MasterRole?.name || user.Role?.name || null,
+      role: user.MasterRole?.name || user.role?.name || null,
       userType,
     },
     // Org context — frontend can use this to show org branding

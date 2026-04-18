@@ -13,7 +13,7 @@ export const getAllOrganizations = async (filters = {}) => {
     plan_id,
   } = filters;
 
-  const where = { is_deleted: false }; // ✅ Organization model HAS is_deleted — keep it
+  const where = { is_deleted: false };
 
   if (search) {
     where[Op.or] = [
@@ -32,10 +32,10 @@ export const getAllOrganizations = async (filters = {}) => {
 
   const { count, rows } = await masterDb.Organization.findAndCountAll({
     where,
-    // ✅ Plan association has NO alias — include without 'as' is correct here
     include: [
       {
         model: masterDb.Plan,
+        as: "plan",
         attributes: ["id", "name", "billing_cycle", "price"],
       },
     ],

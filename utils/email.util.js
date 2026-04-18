@@ -160,3 +160,53 @@ export const sendOwnerWelcomeEmail = async ({
     `,
   });
 };
+
+// ─── Invitation Email ──────────────────────────────────────────────────────────
+
+/**
+ * Sent to the invited person with a link to accept the invitation.
+ *
+ * @param {string} toEmail      - the invited person's email
+ * @param {string} orgName      - org display name
+ * @param {string} roleName     - role they are being invited as
+ * @param {string} token        - raw invitation token
+ * @param {string} tenantSchema - org schema name (embedded in the accept link)
+ */
+export const sendInvitationEmail = async ({
+  toEmail,
+  orgName,
+  roleName,
+  token,
+  tenantSchema,
+}) => {
+  const frontendUrl = envConfig.FRONTEND_SERVICE_URL || "http://localhost:5173";
+  const acceptUrl = `${frontendUrl}/invite/accept?token=${token}&schema=${tenantSchema}`;
+
+  await transporter.sendMail({
+    from: `"MeetFlow" <${envConfig.MAIL_FROM_ADDRESS}>`,
+    to: toEmail,
+    subject: `You've been invited to join ${orgName} on MeetFlow`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;">
+        <h2 style="color:#1a1a2e;">You're invited!</h2>
+        <p>
+          You have been invited to join <strong>${orgName}</strong> on MeetFlow
+          as <strong>${roleName}</strong>.
+        </p>
+        <p>Click the button below to accept your invitation and set up your account.
+           This link expires in <strong>7 days</strong>.</p>
+        <a href="${acceptUrl}"
+           style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#fff;
+                  text-decoration:none;border-radius:6px;font-weight:600;margin:16px 0;">
+          Accept Invitation
+        </a>
+        <p style="color:#666;font-size:13px;">
+          If you didn't expect this invitation, you can safely ignore this email.
+        </p>
+        <p style="color:#999;font-size:12px;">
+          Or copy this link: <a href="${acceptUrl}">${acceptUrl}</a>
+        </p>
+      </div>
+    `,
+  });
+};

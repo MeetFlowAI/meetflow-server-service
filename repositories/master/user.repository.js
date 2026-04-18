@@ -37,7 +37,7 @@ export const getAllUsers = async (filters = {}) => {
     include: [
       {
         model: masterDb.MasterRole,
-        as: "MasterRole", // ✅ FIXED: association defined with alias — must pass as
+        as: "role",
         attributes: ["id", "name"],
       },
     ],
@@ -64,7 +64,7 @@ export const getUserById = async (id) => {
     include: [
       {
         model: masterDb.MasterRole,
-        as: "MasterRole", // ✅ FIXED: association defined with alias — must pass as
+        as: "role",
         attributes: ["id", "name"],
       },
     ],

@@ -18,6 +18,10 @@ export const RoleModel = (sequelize, DataTypes, options = {}) => {
         unique: true,
         allowNull: false,
       },
+      display_name: {
+        type: DataTypes.STRING(100),
+        allowNull: false,
+      },
       description: {
         type: DataTypes.TEXT,
       },

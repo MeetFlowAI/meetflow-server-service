@@ -59,7 +59,7 @@ export const MasterUserModel = (sequelize, DataTypes) => {
       },
     },
     {
-      tableName: "master_users",
+      tableName: "users",
       schema: "master_tenant",
       timestamps: true,
       underscored: true,

@@ -4,6 +4,10 @@ import { RESPONSE_MESSAGES, STATUS_CODES } from "../constants/response.js";
 import AuthRoutes from "./common/auth.route.js";
 import AccountRoutes from "./common/account.route.js";
 import MasterRoutes from "./master/index.js";
+import OrganizationRoutes from "./organization/index.js";
+import WorkspaceRoutes from "./workspace/index.js";
+import LiveKitWebhookRoutes from "./webhook/livekit.route.js";
+import StreamChatRoutes from "./chat/stream.route.js";
 
 const apiRoutes = Router();
 
@@ -24,8 +28,14 @@ apiRoutes.get("/health", async (req, res) => {
 apiRoutes.use("/auth", AuthRoutes);
 apiRoutes.use("/account", AccountRoutes);
 apiRoutes.use("/master", MasterRoutes);
+apiRoutes.use("/organization", OrganizationRoutes);
+apiRoutes.use("/workspace", WorkspaceRoutes);
 
-// apiRoutes.use("/organization", OrganizationRoutes);
-// apiRoutes.use("/workspace", WorkspaceRoutes);
+// Stream Chat — token, channel provisioning, DMs, meeting chat
+apiRoutes.use("/chat", StreamChatRoutes);
+
+// LiveKit webhook — PUBLIC, no JWT, signature-verified internally
+// Register this URL in your LiveKit dashboard: Settings → Webhooks
+apiRoutes.use("/webhook/livekit", LiveKitWebhookRoutes);
 
 export default apiRoutes;

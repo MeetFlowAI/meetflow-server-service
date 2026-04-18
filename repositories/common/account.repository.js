@@ -18,8 +18,8 @@ export const getMasterUserProfile = async (userId) => {
     include: [
       {
         model: masterDb.MasterRole,
-        as: "MasterRole", // ✅ FIXED: association defined with alias — must pass as
-        attributes: ["id", "name"],
+        as: "role",
+        attributes: ["id", "name", "display_name", "description"],
       },
     ],
   });
@@ -42,8 +42,8 @@ export const getOrgUserProfile = async (userId, schema) => {
     include: [
       {
         model: tenantDb.Role,
-        as: "Role", // ✅ FIXED: association defined with alias — must pass as
-        attributes: ["id", "name"],
+        as: "role",
+        attributes: ["id", "name", "display_name", "description"],
       },
     ],
   });

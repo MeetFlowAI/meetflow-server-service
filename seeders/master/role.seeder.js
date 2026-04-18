@@ -1,19 +1,22 @@
-import { USER_ROLES } from "../../constants/index.js";
+import { USER_ROLES, USER_ROLES_DISPLAY_NAME } from "../../constants/index.js";
 
 export const seedMasterRoles = async (db) => {
   const roles = [
     {
       name: USER_ROLES.MASTER.MASTER_SUPER_ADMIN,
+      display_name: USER_ROLES_DISPLAY_NAME.MASTER.MASTER_SUPER_ADMIN,
       description: "Full system access",
       is_system: true,
     },
     {
       name: USER_ROLES.MASTER.MASTER_ADMIN,
+      display_name: USER_ROLES_DISPLAY_NAME.MASTER.MASTER_ADMIN,
       description: "Limited admin access",
       is_system: true,
     },
     {
       name: USER_ROLES.MASTER.MASTER_MEMBER,
+      display_name: USER_ROLES_DISPLAY_NAME.MASTER.MASTER_MEMBER,
       description: "Basic access",
       is_system: true,
     },

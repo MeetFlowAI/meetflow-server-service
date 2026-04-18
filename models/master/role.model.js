@@ -14,6 +14,10 @@ export const MasterRoleModel = (sequelize, DataTypes) => {
         allowNull: false,
         required: [true, "Role name is required."],
       },
+      display_name: {
+        type: DataTypes.STRING(100),
+        allowNull: false,
+      },
       description: {
         type: DataTypes.TEXT,
       },

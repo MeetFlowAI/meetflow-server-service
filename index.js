@@ -9,7 +9,7 @@ import { envConfig } from "./config/env.config.js";
  * Start server
  */
 const startServer = async () => {
-  const PORT = envConfig.BACKEND_SERVICE_PORT || 8000;
+  const PORT = process.env.PORT || envConfig.BACKEND_SERVICE_PORT || 8000;
   try {
     console.log("🚀 MeetFlow Backend Server Starting...");
     console.log(`📚 Environment: ${envConfig.NODE_ENV}`);
@@ -19,7 +19,7 @@ const startServer = async () => {
     await initializeDatabase();
 
     // Start listening
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`✅ Server running on port ${PORT}`);
       console.log(`🌐 API: http://localhost:${PORT}/api/v1`);
       console.log(`💚 Health: http://localhost:${PORT}/api/v1/health`);

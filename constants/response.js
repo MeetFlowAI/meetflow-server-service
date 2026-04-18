@@ -81,6 +81,68 @@ const RESPONSE_MESSAGES = {
         ASSIGN_PLAN: "Plan assigned to organization successfully",
       },
     },
+
+    ORG: {
+      GET_MY_ORG: "Organization retrieved successfully",
+      UPDATE_SETTINGS: "Organization settings updated successfully",
+
+      USER: {
+        GET_ALL: "Users retrieved successfully",
+        GET_ONE: "User retrieved successfully",
+        ROLE_UPDATE: "User role updated successfully",
+        DEACTIVATE: "User deactivated successfully",
+        ACTIVATE: "User activated successfully",
+        REMOVE: "User removed successfully",
+      },
+
+      INVITATION: {
+        GET_ALL: "Invitations retrieved successfully",
+        SEND: "Invitation sent successfully",
+        RESEND: "Invitation resent successfully",
+        CANCEL: "Invitation cancelled successfully",
+        ACCEPT: "Invitation accepted. Account created successfully.",
+      },
+
+      ROLE: {
+        GET_ALL: "Roles retrieved successfully",
+        GET_ONE: "Role retrieved successfully",
+        CREATE: "Role created successfully",
+        UPDATE: "Role updated successfully",
+        DELETE: "Role deleted successfully",
+      },
+    },
+
+    WORKSPACE: {
+      GET_ALL: "Workspaces retrieved successfully",
+      GET_ONE: "Workspace retrieved successfully",
+      CREATE: "Workspace created successfully",
+      UPDATE: "Workspace updated successfully",
+      DELETE: "Workspace deleted successfully",
+      MY_WORKSPACES: "Your workspaces retrieved successfully",
+
+      MEMBER: {
+        GET_ALL: "Members retrieved successfully",
+        ADD: "Member added to workspace successfully",
+        ROLE_UPDATE: "Member role updated successfully",
+        REMOVE: "Member removed successfully",
+      },
+
+      CHANNEL: {
+        GET_ALL: "Channels retrieved successfully",
+        GET_ONE: "Channel retrieved successfully",
+        CREATE: "Channel created successfully",
+        UPDATE: "Channel updated successfully",
+        DELETE: "Channel deleted successfully",
+      },
+
+      CHANNEL_MEMBER: {
+        GET_ALL: "Channel members retrieved successfully",
+        ADD: "Member added to channel successfully",
+        REMOVE: "Member removed from channel successfully",
+        JOIN: "Joined channel successfully",
+        LEAVE: "Left channel successfully",
+      },
+    },
   },
 
   ERROR_MESSAGES: {

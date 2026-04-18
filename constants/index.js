@@ -15,6 +15,23 @@ const USER_ROLES = {
     WORKSPACE_MEMBER: "workspace_member",
   },
 };
+const USER_ROLES_DISPLAY_NAME = {
+  MASTER: {
+    MASTER_SUPER_ADMIN: "Master Super Admin",
+    MASTER_ADMIN: "Master Admin",
+    MASTER_MEMBER: "Master Member",
+  },
+  ORGANIZATION: {
+    ORGANIZATION_SUPER_ADMIN: "Organization Super Admin",
+    ORGANIZATION_ADMIN: "Organization Admin",
+    ORGANIZATION_MEMBER: "Organization Member",
+  },
+  WORKSPACE: {
+    WORKSPACE_OWNER: "Workspace Owner",
+    WORKSPACE_ADMIN: "Workspace Admin",
+    WORKSPACE_MEMBER: "Workspace Member",
+  },
+};
 
 export const TOKEN_EXPIRY = {
   ACCESS: "1d",
@@ -87,6 +104,7 @@ const FREE_EMAIL_DOMAINS = new Set([
 
 export {
   USER_ROLES,
+  USER_ROLES_DISPLAY_NAME,
   PLANS,
   PLAN_BILLING_CYCLES,
   SUBSCRIPTION_STATUSES,

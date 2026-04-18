@@ -1,12 +1,37 @@
 import { envConfig } from "./env.config.js";
 
+// Support both DATABASE_URL (Neon/hosted) and individual vars (local dev)
+const parseDatabaseUrl = (url) => {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return {
+      HOST: parsed.hostname,
+      USER: parsed.username,
+      PASSWORD: parsed.password,
+      DB: parsed.pathname.replace("/", ""),
+      PORT: parsed.port || 5432,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const urlCredentials = parseDatabaseUrl(process.env.DATABASE_URL);
+
 export const dbConfig = {
-  HOST: envConfig.DATABASE_CREDENTIALS.HOST,
-  USER: envConfig.DATABASE_CREDENTIALS.USER,
-  PASSWORD: envConfig.DATABASE_CREDENTIALS.PASSWORD,
-  DB: envConfig.DATABASE_CREDENTIALS.DB,
-  PORT: envConfig.DATABASE_CREDENTIALS.PORT,
-  DIALECT: envConfig.DATABASE_CREDENTIALS.DIALECT,
+  HOST: urlCredentials?.HOST || envConfig.DATABASE_CREDENTIALS.HOST,
+  USER: urlCredentials?.USER || envConfig.DATABASE_CREDENTIALS.USER,
+  PASSWORD: urlCredentials?.PASSWORD || envConfig.DATABASE_CREDENTIALS.PASSWORD,
+  DB: urlCredentials?.DB || envConfig.DATABASE_CREDENTIALS.DB,
+  PORT: urlCredentials?.PORT || envConfig.DATABASE_CREDENTIALS.PORT,
+  DIALECT: "postgres",
+  // Neon requires SSL — only applied when DATABASE_URL is set
+  ...(process.env.DATABASE_URL && {
+    dialectOptions: {
+      ssl: { require: true, rejectUnauthorized: false },
+    },
+  }),
   pool: {
     max: 10,
     min: 0,

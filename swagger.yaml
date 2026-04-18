@@ -88,14 +88,39 @@ tags:
       PostgreSQL schema. Domain mapping drives silent login routing.
       On creation, two emails are sent automatically — one to the org official
       email confirming provisioning, one to the owner with temporary login credentials.
-  - name: Organization
+  - name: Organization / Profile
     description: >
-      Organisation-level APIs — coming soon.
-      Will cover members, invitations, org-level roles and settings.
-  - name: Workspace
+      Organization dashboard home — profile, live stats, and plan limit usage.
+      Requires org context (Bearer token of an org user).
+  - name: Organization / Roles
     description: >
-      Workspace and channel management — coming soon.
-      Will cover workspaces, channels, members and meetings.
+      Manage custom org roles. System roles (organization_super_admin,
+      organization_admin, organization_member) are seeded on org creation
+      and cannot be modified or deleted.
+  - name: Organization / Users
+    description: >
+      Manage org members — list, activate/deactivate, and remove users.
+      User creation happens via the Invitations flow.
+  - name: Organization / Invitations
+    description: >
+      Invite external users to join the organization. Includes a public
+      accept-invitation endpoint (no auth) called when the user clicks the
+      emailed invite link.
+  - name: Workspace / Workspaces
+    description: >
+      Workspace CRUD. On creation a default #general channel is auto-provisioned
+      and the creator is added as workspace_owner. Plan limit max_workspaces enforced.
+  - name: Workspace / Members
+    description: >
+      Manage workspace membership. Users must already be org members.
+      Roles: workspace_owner, workspace_admin, workspace_member.
+  - name: Workspace / Channels
+    description: >
+      Channel management within a workspace. Channels are public or private.
+      Channel names are always lowercase. Plan limit max_channels_per_workspace enforced.
+  - name: Workspace / Channel Members
+    description: >
+      Manage who is in a channel. Includes self-service join/leave for public channels.
 
 components:
   securitySchemes:
@@ -1531,6 +1556,479 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+
+    # ── Organization / Profile ────────────────────────────────────────────────
+    OrgStats:
+      type: object
+      properties:
+        totalMembers:
+          type: integer
+          example: 12
+        activeMembers:
+          type: integer
+          example: 10
+        pendingInvitations:
+          type: integer
+          example: 3
+        totalWorkspaces:
+          type: integer
+          example: 4
+        totalChannels:
+          type: integer
+          example: 18
+
+    PlanLimitWithUsage:
+      type: object
+      properties:
+        limit_key:
+          type: string
+          example: max_workspaces
+        limit_value:
+          type: integer
+          example: 10
+          description: -1 means unlimited
+        current_value:
+          type: integer
+          example: 4
+
+    UpdateOrgSettingsRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          example: Acme Corporation
+        display_name:
+          type: string
+          maxLength: 100
+          example: Acme Corp
+        logo:
+          type: string
+          nullable: true
+          example: "https://cdn.acme.com/logo-v2.png"
+        official_email:
+          type: string
+          format: email
+          example: hello@acme.com
+
+    # ── Organization / Roles ──────────────────────────────────────────────────
+    OrgRole:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: organization_admin
+        description:
+          type: string
+          nullable: true
+          example: "Can manage org settings, users, and workspaces"
+        is_system:
+          type: boolean
+          example: true
+          description: System roles (organization_super_admin, organization_admin, organization_member) cannot be modified or deleted.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrgRoleRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: department_manager
+        description:
+          type: string
+          nullable: true
+          example: "Can manage their department's channels and members"
+
+    UpdateOrgRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+          nullable: true
+
+    # ── Organization / Users ──────────────────────────────────────────────────
+    OrgUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        first_name:
+          type: string
+          example: Alex
+        last_name:
+          type: string
+          example: Johnson
+        email:
+          type: string
+          format: email
+          example: alex@acme.com
+        is_active:
+          type: boolean
+          example: true
+        is_deleted:
+          type: boolean
+          example: false
+        must_change_password:
+          type: boolean
+          example: false
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        Role:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+              example: organization_member
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ── Organization / Invitations ────────────────────────────────────────────
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          format: email
+          example: alex@acme.com
+        role_id:
+          type: integer
+          example: 3
+        status:
+          type: string
+          enum: [pending, accepted, cancelled, expired, rejected]
+          example: pending
+        expires_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        invited_by_id:
+          type: integer
+          nullable: true
+        InvitedBy:
+          nullable: true
+          type: object
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    SendInvitationRequest:
+      type: object
+      required:
+        - email
+        - role_id
+      properties:
+        email:
+          type: string
+          format: email
+          example: alex.johnson@acme.com
+        role_id:
+          type: integer
+          format: int64
+          example: 3
+          description: ID of the org role to assign on acceptance
+
+    AcceptInvitationRequest:
+      type: object
+      required:
+        - token
+        - tenant_schema
+        - first_name
+        - last_name
+        - password
+      properties:
+        token:
+          type: string
+          description: Invitation token from the `?token=` query param in the invite link
+          example: "a3f7c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
+        tenant_schema:
+          type: string
+          description: Org tenant schema name from the `?schema=` query param in the invite link
+          example: "org_acme_com"
+        first_name:
+          type: string
+          maxLength: 50
+          example: Alex
+        last_name:
+          type: string
+          maxLength: 50
+          example: Johnson
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "MySecure@Pass1"
+
+    # ── Workspace ─────────────────────────────────────────────────────────────
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: Engineering
+        description:
+          type: string
+          nullable: true
+          example: "All things engineering"
+        created_by_id:
+          type: integer
+          format: int64
+          example: 2
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWorkspaceRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Engineering
+        description:
+          type: string
+          nullable: true
+          example: "All things engineering"
+
+    UpdateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Engineering Team
+        description:
+          type: string
+          nullable: true
+
+    # ── Workspace Members ─────────────────────────────────────────────────────
+    WorkspaceMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        workspace_id:
+          type: integer
+          format: int64
+          example: 1
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          example: workspace_member
+        User:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+            is_active:
+              type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    AddWorkspaceMemberRequest:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+          description: ID of the org user to add to this workspace
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          default: workspace_member
+          example: workspace_member
+
+    UpdateWorkspaceMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          example: workspace_admin
+
+    # ── Channels ──────────────────────────────────────────────────────────────
+    Channel:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: general
+          description: Always lowercase (normalised on create/update)
+        description:
+          type: string
+          nullable: true
+          example: "General discussion for everyone"
+        workspace_id:
+          type: integer
+          format: int64
+          example: 1
+        type:
+          type: string
+          enum: [public, private]
+          example: public
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateChannelRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: announcements
+          description: Will be lowercased automatically
+        description:
+          type: string
+          nullable: true
+          example: "Company-wide announcements"
+        type:
+          type: string
+          enum: [public, private]
+          default: public
+          example: public
+        member_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          nullable: true
+          description: Initial member user IDs (only used for private channels)
+          example: [5, 7, 8]
+
+    UpdateChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: announcements-v2
+        description:
+          type: string
+          nullable: true
+
+    # ── Channel Members ────────────────────────────────────────────────────────
+    ChannelMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        channel_id:
+          type: integer
+          format: int64
+          example: 3
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+        User:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AddChannelMemberRequest:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+          description: Must be a member of the parent workspace
 
 paths:
   # ═══════════════════════════════════════════════════════════════════════════
@@ -3970,3 +4468,1432 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "403":
           $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Profile
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/profile/get-org-profile:
+    get:
+      tags: [Organization / Profile]
+      summary: Get organization profile + dashboard stats
+      description: |
+        Returns the full org record (name, plan, subscription status) combined with
+        live dashboard stats (total members, active workspaces, channels, pending invites)
+        and the plan limits with current usage for each key.
+
+        This is the data source for the **Organization Dashboard home page**.
+        Requires org context (Bearer token of an org user).
+      operationId: getOrgProfile
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          organization:
+                            $ref: "#/components/schemas/Organization"
+                          stats:
+                            $ref: "#/components/schemas/OrgStats"
+                          plan_limits:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PlanLimitWithUsage"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/profile/update-org-settings:
+    patch:
+      tags: [Organization / Profile]
+      summary: Update organization settings
+      description: |
+        Updates editable org fields: `name`, `display_name`, `logo`, `official_email`.
+        Domain and plan changes are not allowed here — those are master-admin operations.
+      operationId: updateOrgSettings
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgSettingsRequest"
+            example:
+              display_name: Acme Corp v2
+              logo: "https://cdn.acme.com/logo-v2.png"
+      responses:
+        "200":
+          description: Organization settings updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Roles
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/roles/get-all-roles:
+    get:
+      tags: [Organization / Roles]
+      summary: Get all org roles
+      operationId: getOrgRoles
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Roles retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/OrgRole"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/roles/get-role-by-id/{id}:
+    get:
+      tags: [Organization / Roles]
+      summary: Get org role by ID
+      operationId: getOrgRoleById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/roles/create-role:
+    post:
+      tags: [Organization / Roles]
+      summary: Create a custom org role
+      description: Creates a custom role in this org's tenant schema. System roles cannot be created via this endpoint.
+      operationId: createOrgRole
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrgRoleRequest"
+            example:
+              name: department_manager
+              description: "Can manage their department's channels and members"
+      responses:
+        "201":
+          description: Role created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: Role name already exists
+
+  /organization/roles/update-role/{id}:
+    patch:
+      tags: [Organization / Roles]
+      summary: Update a custom org role
+      description: Only custom (non-system) roles can be modified.
+      operationId: updateOrgRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgRoleRequest"
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/roles/delete-role/{id}:
+    delete:
+      tags: [Organization / Roles]
+      summary: Delete a custom org role
+      description: Only custom (non-system) roles can be deleted.
+      operationId: deleteOrgRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Users
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/users/get-all-users:
+    get:
+      tags: [Organization / Users]
+      summary: Get all org users
+      operationId: getOrgUsers
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+        - name: role_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/OrgUser"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/users/get-user-by-id/{id}:
+    get:
+      tags: [Organization / Users]
+      summary: Get org user by ID
+      operationId: getOrgUserById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/activate-user/{id}:
+    patch:
+      tags: [Organization / Users]
+      summary: Activate an org user
+      operationId: activateOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User activated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/deactivate-user/{id}:
+    patch:
+      tags: [Organization / Users]
+      summary: Deactivate an org user
+      description: Cannot deactivate yourself or the org super admin.
+      operationId: deactivateOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User deactivated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/delete-user/{id}:
+    delete:
+      tags: [Organization / Users]
+      summary: Remove an org user (soft delete)
+      description: |
+        Soft-deletes the user from the org. Cannot remove yourself or the org super admin.
+        The user will no longer be able to log in to this org.
+      operationId: removeOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Invitations
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/invitations/accept-invitation:
+    post:
+      tags: [Organization / Invitations]
+      summary: Accept an invitation (public — no auth needed)
+      description: |
+        Called when an invited user clicks the invite link in their email.
+        The invitation `token` comes from the `?token=` query param in the invite link.
+        The `tenant_schema` comes from the `?schema=` query param.
+
+        On success, creates the user account and returns basic profile info.
+        The user should then log in normally via POST /auth/login.
+      operationId: acceptInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInvitationRequest"
+            example:
+              token: "a3f7c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
+              tenant_schema: "org_acme_com"
+              first_name: Alex
+              last_name: Johnson
+              password: "MySecure@Pass1"
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                          email:
+                            type: string
+                          first_name:
+                            type: string
+                          last_name:
+                            type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "409":
+          description: User already exists
+
+  /organization/invitations/get-all-invitations:
+    get:
+      tags: [Organization / Invitations]
+      summary: Get all invitations
+      operationId: getOrgInvitations
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, accepted, cancelled, expired, rejected]
+      responses:
+        "200":
+          description: Invitations retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Invitation"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/invitations/send-invitation:
+    post:
+      tags: [Organization / Invitations]
+      summary: Send an invitation
+      description: |
+        Sends an email invitation to the provided address.
+        The invitation link contains a `?token=` and `?schema=` param that the frontend
+        must pass to POST /organization/invitations/accept-invitation.
+        Invitations expire after **7 days**.
+      operationId: sendInvitation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendInvitationRequest"
+            example:
+              email: alex.johnson@acme.com
+              role_id: 3
+      responses:
+        "201":
+          description: Invitation sent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: User already a member or invitation already pending
+
+  /organization/invitations/resend-invitation/{id}:
+    patch:
+      tags: [Organization / Invitations]
+      summary: Resend an invitation
+      description: Generates a new token, resets the expiry to 7 days from now, and resends the email.
+      operationId: resendInvitation
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Invitation resent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/invitations/cancel-invitation/{id}:
+    delete:
+      tags: [Organization / Invitations]
+      summary: Cancel a pending invitation
+      operationId: cancelInvitation
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Invitation cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Workspaces
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/workspaces/my-workspaces:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get my workspaces
+      description: |
+        Returns all workspaces the authenticated user belongs to, each including
+        `my_role` (workspace_owner / workspace_admin / workspace_member).
+        This is the workspace selection screen shown after org login.
+      operationId: getMyWorkspaces
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Workspaces retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: "#/components/schemas/Workspace"
+                            - type: object
+                              properties:
+                                my_role:
+                                  type: string
+                                  enum:
+                                    [
+                                      workspace_owner,
+                                      workspace_admin,
+                                      workspace_member,
+                                    ]
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /workspace/workspaces/get-all-workspaces:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get all workspaces (admin)
+      description: Returns all workspaces in the org. Admin-only.
+      operationId: getAllWorkspaces
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+      responses:
+        "200":
+          description: Workspaces retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Workspace"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /workspace/workspaces/get-workspace-by-id/{id}:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get workspace by ID
+      description: The requesting user must be a member of the workspace.
+      operationId: getWorkspaceById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Workspace retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/workspaces/create-workspace:
+    post:
+      tags: [Workspace / Workspaces]
+      summary: Create a workspace
+      description: |
+        Creates a new workspace. The creator is automatically added as `workspace_owner`.
+        A default **#general** public channel is auto-created and the creator is added to it.
+        Plan limit `max_workspaces` is enforced.
+      operationId: createWorkspace
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+            example:
+              name: Engineering
+              description: "All things engineering"
+      responses:
+        "201":
+          description: Workspace created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Plan workspace limit reached
+        "409":
+          description: Workspace name already exists
+
+  /workspace/workspaces/update-workspace/{id}:
+    patch:
+      tags: [Workspace / Workspaces]
+      summary: Update a workspace
+      description: Only the workspace owner or org admin can update workspace details.
+      operationId: updateWorkspace
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceRequest"
+      responses:
+        "200":
+          description: Workspace updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/workspaces/delete-workspace/{id}:
+    delete:
+      tags: [Workspace / Workspaces]
+      summary: Delete a workspace
+      description: Only the workspace owner or org super admin can delete a workspace.
+      operationId: deleteWorkspace
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Workspace deleted (deactivated) successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Workspace Members
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/members/get-all-members:
+    get:
+      tags: [Workspace / Members]
+      summary: Get all workspace members
+      operationId: getWorkspaceMembers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Members retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/WorkspaceMember"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/members/add-member:
+    post:
+      tags: [Workspace / Members]
+      summary: Add a member to a workspace
+      description: The user must already be an org member. Only org admins can add members.
+      operationId: addWorkspaceMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddWorkspaceMemberRequest"
+            example:
+              user_id: 5
+              role: workspace_member
+      responses:
+        "201":
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "409":
+          description: User is already a workspace member
+
+  /workspace/{workspaceId}/members/update-member/{userId}:
+    patch:
+      tags: [Workspace / Members]
+      summary: Update a member's workspace role
+      description: |
+        Changes the role of a workspace member.
+        Cannot change your own role. Cannot demote the workspace owner.
+      operationId: updateWorkspaceMemberRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceMemberRoleRequest"
+            example:
+              role: workspace_admin
+      responses:
+        "200":
+          description: Member role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/members/remove-member/{userId}:
+    delete:
+      tags: [Workspace / Members]
+      summary: Remove a member from a workspace
+      description: |
+        Cannot remove yourself (use leave workspace instead).
+        Cannot remove the workspace owner.
+      operationId: removeWorkspaceMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      responses:
+        "200":
+          description: Member removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Channels
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/channels/get-all-channels:
+    get:
+      tags: [Workspace / Channels]
+      summary: Get channels for user
+      description: |
+        Returns public channels + private channels where the user is a member.
+        The user must be a workspace member.
+      operationId: getChannelsForUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      responses:
+        "200":
+          description: Channels retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/get-channel-by-id/{channelId}:
+    get:
+      tags: [Workspace / Channels]
+      summary: Get channel by ID
+      description: For private channels, the user must be a member.
+      operationId: getChannelById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      responses:
+        "200":
+          description: Channel retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/create-channel:
+    post:
+      tags: [Workspace / Channels]
+      summary: Create a channel
+      description: |
+        Creates a new channel in the workspace. The user must be a workspace member.
+        Channel names are lowercased automatically (like Slack).
+        For private channels, you can pass `member_ids` to add initial members.
+        Plan limit `max_channels_per_workspace` is enforced.
+      operationId: createChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+            examples:
+              publicChannel:
+                summary: Public channel
+                value:
+                  name: announcements
+                  description: "Company-wide announcements"
+                  type: public
+              privateChannel:
+                summary: Private channel with initial members
+                value:
+                  name: design-team
+                  description: "Private design discussions"
+                  type: private
+                  member_ids: [5, 7, 8]
+      responses:
+        "201":
+          description: Channel created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Not a workspace member, or plan channel limit reached
+        "409":
+          description: Channel name already exists in this workspace
+
+  /workspace/{workspaceId}/channels/update-channel/{channelId}:
+    patch:
+      tags: [Workspace / Channels]
+      summary: Update a channel
+      description: Only workspace owners and admins can update channels.
+      operationId: updateChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: Channel updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/delete-channel/{channelId}:
+    delete:
+      tags: [Workspace / Channels]
+      summary: Delete a channel
+      description: |
+        Only workspace admins or org admins can delete channels.
+        The **#general** channel cannot be deleted.
+      operationId: deleteChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      responses:
+        "200":
+          description: Channel deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Channel Members
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/channels/{channelId}/members/get-all-members:
+    get:
+      tags: [Workspace / Channel Members]
+      summary: Get channel members
+      description: For private channels, only members can list other members.
+      operationId: getChannelMembers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Channel members retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/ChannelMember"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /workspace/{workspaceId}/channels/{channelId}/members/add-member:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Add a member to a channel
+      description: The user must be a workspace member. Cannot add to a channel they're already in.
+      operationId: addChannelMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddChannelMemberRequest"
+            example:
+              user_id: 5
+      responses:
+        "201":
+          description: Member added to channel successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ChannelMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: Already a channel member
+
+  /workspace/{workspaceId}/channels/{channelId}/members/remove-member/{userId}:
+    delete:
+      tags: [Workspace / Channel Members]
+      summary: Remove a member from a channel
+      operationId: removeChannelMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Member removed from channel successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/{channelId}/members/join-channel:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Join a public channel
+      description: |
+        Self-service join for public channels.
+        The user must be a workspace member.
+        Private channels cannot be joined this way — use add-member instead.
+      operationId: joinChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Joined channel successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ChannelMember"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Cannot join private channel or not a workspace member
+        "409":
+          description: Already a channel member
+
+  /workspace/{workspaceId}/channels/{channelId}/members/leave-channel:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Leave a channel
+      description: |
+        The authenticated user leaves the channel.
+        Cannot leave the **#general** channel.
+      operationId: leaveChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Left channel successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Cannot leave #general channel
+        "404":
+          description: Not a channel member

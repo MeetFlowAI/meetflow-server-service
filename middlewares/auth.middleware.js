@@ -58,7 +58,7 @@ export const authenticate = (req, res, next) => {
  * Role guard — use after authenticate().
  * Usage: authorize("super_admin", "admin")
  */
-export const authorize = (...allowedRoles) => {
+export const authorize = (allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
       return errorResponse(
@@ -68,6 +68,11 @@ export const authorize = (...allowedRoles) => {
         "Not authenticated.",
         null,
       );
+    }
+    console.log("allowed roles", allowedRoles);
+    console.log("user.role", req.user.role);
+    if (allowedRoles.includes(req.user.role)) {
+      console.log("heyy");
     }
 
     if (!allowedRoles.includes(req.user.role)) {

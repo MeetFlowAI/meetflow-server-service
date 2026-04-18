@@ -32,7 +32,7 @@ export const findMasterUserByEmail = async (email) => {
     include: [
       {
         model: masterDb.MasterRole,
-        as: "MasterRole", // ✅ required — association defined with this alias
+        as: "role",
         attributes: ["id", "name"],
       },
     ],
@@ -49,7 +49,7 @@ export const findOrgUserByEmail = async (email, schema) => {
     include: [
       {
         model: tenantDb.Role,
-        as: "Role", // ✅ required — association defined with this alias
+        as: "role", // ✅ required — association defined with this alias
         attributes: ["id", "name"],
       },
     ],

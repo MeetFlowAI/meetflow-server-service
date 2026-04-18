@@ -36,4 +36,12 @@ export const envConfig = {
   MAIL_APP_PASSWORD: process.env.MAIL_APP_PASSWORD,
 
   FRONTEND_SERVICE_URL: process.env.FRONTEND_SERVICE_URL,
+
+  LIVEKIT_URL: process.env.LIVEKIT_URL,
+  LIVEKIT_API_KEY: process.env.LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET: process.env.LIVEKIT_API_SECRET,
+
+  // ── Stream Chat ────────────────────────────────────────────────────────────
+  STREAM_API_KEY: process.env.STREAM_API_KEY,
+  STREAM_API_SECRET: process.env.STREAM_API_SECRET,
 };
