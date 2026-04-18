@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: meetflow-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: BACKEND_SERVICE_PORT
+        value: 10000
+      - key: ACCESS_TOKEN_SECRET
+        sync: false
+      - key: REFRESH_TOKEN_SECRET
+        sync: false
+      - key: HOST_FNAME
+        sync: false
+      - key: HOST_LNAME
+        sync: false
+      - key: HOST_EMAIL
+        sync: false
+      - key: HOST_PASSWORD
+        sync: false
+      - key: HOST_ROLE
+        value: master_super_admin
+      - key: MAIL_FROM_ADDRESS
+        sync: false
+      - key: MAIL_APP_PASSWORD
+        sync: false
+      - key: FRONTEND_SERVICE_URL
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: STREAM_API_KEY
+        sync: false
+      - key: STREAM_API_SECRET
+        sync: false

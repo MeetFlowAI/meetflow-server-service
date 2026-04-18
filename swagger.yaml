@@ -1,0 +1,5899 @@
+openapi: 3.0.3
+
+info:
+  title: MeetFlow API
+  version: 1.0.0
+  description: |
+    ## MeetFlow Backend REST API
+
+    This API powers the MeetFlow SaaS platform. It is divided into four
+    top-level sections:
+
+    | Section          | Base Path          | Description                                    |
+    |------------------|--------------------|------------------------------------------------|
+    | **Common**       | `/api/v1/auth` & `/api/v1/account`          | Authentication & account management            |
+    | **Master**       | `/api/v1/master`   | MeetFlow internal admin panel (master context) |
+    | **Organization** | `/api/v1/organization` | Organisation-level management (coming soon) |
+    | **Workspace**    | `/api/v1/workspace`    | Workspace & channel management (coming soon)|
+
+    ### Authentication
+    All **Master**, **Organization**, and **Workspace** routes require a valid
+    JWT `accessToken` in the `Authorization` header:
+    ```
+    Authorization: Bearer <accessToken>
+    ```
+    Use the **Login** endpoint to obtain tokens.
+
+    ### Standard Response Envelope
+    Every response (success or error) is wrapped in:
+    ```json
+    {
+      "status": {
+        "response_code": 200,
+        "response_message": "Success!"
+      },
+      "message": "Human-readable message",
+      "data": { ... }
+    }
+    ```
+    Error responses replace `data` with an `error` object containing `details`.
+
+  contact:
+    name: MeetFlow Engineering
+  license:
+    name: ISC
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Development
+  - url: https://api.meetflow.com/api/v1
+    description: Production
+
+tags:
+  - name: Common / Health
+    description: Server health check
+  - name: Common / Auth
+    description: >
+      Unified authentication — single login endpoint silently routes
+      master users (personal/free email domains) and organisation users
+      (corporate/edu domains) based on email domain mapping.
+  - name: Common / Account
+    description: >
+      Authenticated user profile and password management.
+      Works for both master users and org users.
+  - name: Master / Roles
+    description: >
+      Manage master-level roles (e.g. master_super_admin, master_admin,
+      master_member). Requires authenticate + requireMasterContext.
+  - name: Master / Users
+    description: >
+      Manage MeetFlow internal staff accounts stored in master_tenant.master_users.
+  - name: Master / Plans
+    description: >
+      Manage subscription plans (Free, Pro, Enterprise) with billing cycles.
+  - name: Master / Plan Features
+    description: >
+      Assign and toggle features on a specific plan.
+      Sub-resource of Plans — paths are nested under /plans/:planId/.
+  - name: Master / Plan Limits
+    description: >
+      Define quantitative limits per plan (e.g. max_users, max_workspaces).
+      Sub-resource of Plans — paths are nested under /plans/:planId/.
+  - name: Master / Features
+    description: >
+      Manage the global feature catalogue (feature keys that can be toggled per plan).
+  - name: Master / Organizations
+    description: >
+      Provision and manage tenant organisations. Each org gets its own
+      PostgreSQL schema. Domain mapping drives silent login routing.
+      On creation, two emails are sent automatically — one to the org official
+      email confirming provisioning, one to the owner with temporary login credentials.
+  - name: Organization / Profile
+    description: >
+      Organization dashboard home — profile, live stats, and plan limit usage.
+      Requires org context (Bearer token of an org user).
+  - name: Organization / Roles
+    description: >
+      Manage custom org roles. System roles (organization_super_admin,
+      organization_admin, organization_member) are seeded on org creation
+      and cannot be modified or deleted.
+  - name: Organization / Users
+    description: >
+      Manage org members — list, activate/deactivate, and remove users.
+      User creation happens via the Invitations flow.
+  - name: Organization / Invitations
+    description: >
+      Invite external users to join the organization. Includes a public
+      accept-invitation endpoint (no auth) called when the user clicks the
+      emailed invite link.
+  - name: Workspace / Workspaces
+    description: >
+      Workspace CRUD. On creation a default #general channel is auto-provisioned
+      and the creator is added as workspace_owner. Plan limit max_workspaces enforced.
+  - name: Workspace / Members
+    description: >
+      Manage workspace membership. Users must already be org members.
+      Roles: workspace_owner, workspace_admin, workspace_member.
+  - name: Workspace / Channels
+    description: >
+      Channel management within a workspace. Channels are public or private.
+      Channel names are always lowercase. Plan limit max_channels_per_workspace enforced.
+  - name: Workspace / Channel Members
+    description: >
+      Manage who is in a channel. Includes self-service join/leave for public channels.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT access token returned by POST /auth/login.
+        Valid for 1 day (or 30 days when rememberMe is true).
+
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      description: Numeric record ID (BIGINT primary key)
+      schema:
+        type: integer
+        format: int64
+        example: 1
+
+    QuerySearch:
+      name: search
+      in: query
+      required: false
+      description: Full-text search / keyword filter
+      schema:
+        type: string
+        example: admin
+
+    QueryPage:
+      name: page
+      in: query
+      required: false
+      description: Page number for pagination (1-based)
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+
+    QueryLimit:
+      name: limit
+      in: query
+      required: false
+      description: Number of records per page
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 100
+
+    QueryIsActive:
+      name: is_active
+      in: query
+      required: false
+      description: Filter by active / inactive status
+      schema:
+        type: boolean
+
+  schemas:
+    # ── Generic envelopes ─────────────────────────────────────────────────────
+    StatusBlock:
+      type: object
+      properties:
+        response_code:
+          type: integer
+          example: 200
+        response_message:
+          type: string
+          example: "Success!"
+
+    SuccessEnvelope:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/StatusBlock"
+        message:
+          type: string
+          example: "Operation successful"
+        data:
+          description: Payload — varies per endpoint
+          nullable: true
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/StatusBlock"
+        message:
+          type: string
+          example: "Something went wrong!"
+        error:
+          type: object
+          properties:
+            details:
+              type: string
+              example: "Invalid credentials."
+
+    DeletedResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              nullable: true
+              example: null
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@gmail.com
+          description: >
+            Free-domain emails are routed to master users.
+            Corporate/edu domains are routed to tenant org users.
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: "StrongPass@123"
+        rememberMe:
+          type: boolean
+          default: false
+          description: Extends refresh token TTL from 7 days to 30 days.
+
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                accessToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                refreshToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                user:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    first_name:
+                      type: string
+                    last_name:
+                      type: string
+                    email:
+                      type: string
+                    role:
+                      type: string
+                      example: master_super_admin
+                    userType:
+                      type: string
+                      example: master
+                      description: >
+                        "master" for MeetFlow staff, or the tenant
+                        schema_name for org users.
+                    must_change_password:
+                      type: boolean
+                      example: false
+                      description: >
+                        If true, the frontend must redirect to a forced
+                        password-change screen before allowing further navigation.
+                        Always false for master users. True for org owners on
+                        first login (auto-generated password was used).
+                org:
+                  description: Non-null only for organisation users.
+                  nullable: true
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    display_name:
+                      type: string
+                    logo:
+                      type: string
+                      nullable: true
+                    schema_name:
+                      type: string
+
+    LogoutRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@gmail.com
+          description: >
+            Always returns 200 — the service never reveals whether the
+            email exists (security best practice).
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - newPassword
+      properties:
+        token:
+          type: string
+          description: Reset token from email link query param ?token=
+          example: "a3f7c2d1e4b5..."
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          example: "NewPass@456"
+        tenantSchema:
+          type: string
+          nullable: true
+          description: >
+            Org tenant schema name. Sent by the frontend from the
+            ?schema= query param in the reset link. Null for master users.
+          example: "org_acme_com"
+
+    # ── Account ───────────────────────────────────────────────────────────────
+    UpdateProfileRequest:
+      type: object
+      properties:
+        first_name:
+          type: string
+          maxLength: 50
+          example: Jane
+        last_name:
+          type: string
+          maxLength: 50
+          example: Smith
+
+    ChangePasswordRequest:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 6
+          example: "OldPass@123"
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          example: "NewPass@456"
+
+    # ── Master Role ───────────────────────────────────────────────────────────
+    Role:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          maxLength: 70
+          example: master_admin
+        description:
+          type: string
+          nullable: true
+          example: "Full access to master panel"
+        is_system:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateRoleRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: master_admin
+        description:
+          type: string
+          example: "Full access to master panel"
+        is_system:
+          type: boolean
+          default: true
+
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+        is_system:
+          type: boolean
+
+    # ── Master User ───────────────────────────────────────────────────────────
+    MasterUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        first_name:
+          type: string
+          example: John
+        last_name:
+          type: string
+          example: Doe
+        email:
+          type: string
+          format: email
+          example: john.doe@gmail.com
+        role_id:
+          type: integer
+          example: 2
+        is_active:
+          type: boolean
+          example: true
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - email
+        - password
+        - role_id
+      properties:
+        first_name:
+          type: string
+          maxLength: 50
+          example: John
+        last_name:
+          type: string
+          maxLength: 50
+          example: Doe
+        email:
+          type: string
+          format: email
+          example: john.doe@gmail.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "StrongPass@123"
+        role_id:
+          type: integer
+          example: 2
+        is_active:
+          type: boolean
+          default: true
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        first_name:
+          type: string
+          maxLength: 50
+        last_name:
+          type: string
+          maxLength: 50
+        email:
+          type: string
+          format: email
+        role_id:
+          type: integer
+        is_active:
+          type: boolean
+
+    # ── Plan ──────────────────────────────────────────────────────────────────
+    Plan:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: Pro
+        description:
+          type: string
+          example: "Best for growing teams"
+        price:
+          type: number
+          format: double
+          example: 29.99
+        billing_cycle:
+          type: string
+          enum: [monthly, yearly, lifetime]
+          example: monthly
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePlanRequest:
+      type: object
+      required:
+        - name
+        - billing_cycle
+        - price
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: Pro
+        description:
+          type: string
+          example: "Best for growing teams"
+        price:
+          type: number
+          format: double
+          minimum: 0
+          example: 29.99
+        billing_cycle:
+          type: string
+          enum: [monthly, yearly, lifetime]
+          example: monthly
+        is_active:
+          type: boolean
+          default: true
+
+    UpdatePlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+          minimum: 0
+        billing_cycle:
+          type: string
+          enum: [monthly, yearly, lifetime]
+        is_active:
+          type: boolean
+
+    # ── Feature ───────────────────────────────────────────────────────────────
+    Feature:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        feature_key:
+          type: string
+          example: video_meetings
+          description: Unique snake_case key used in code-level checks
+        name:
+          type: string
+          example: Video Meetings
+        description:
+          type: string
+          nullable: true
+          example: "Allows scheduling and joining video meetings"
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateFeatureRequest:
+      type: object
+      required:
+        - feature_key
+        - name
+      properties:
+        feature_key:
+          type: string
+          maxLength: 100
+          example: video_meetings
+          description: Unique snake_case identifier, used in code-level flag checks
+        name:
+          type: string
+          maxLength: 100
+          example: Video Meetings
+        description:
+          type: string
+          nullable: true
+          example: "Allows scheduling and joining video meetings"
+        is_active:
+          type: boolean
+          default: true
+
+    UpdateFeatureRequest:
+      type: object
+      properties:
+        feature_key:
+          type: string
+          maxLength: 100
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        is_active:
+          type: boolean
+
+    # ── Plan Feature ──────────────────────────────────────────────────────────
+    PlanFeature:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        plan_id:
+          type: integer
+          format: int64
+          example: 2
+        feature_id:
+          type: integer
+          format: int64
+          example: 3
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+
+    AssignFeatureRequest:
+      type: object
+      required:
+        - feature_id
+      properties:
+        feature_id:
+          type: integer
+          format: int64
+          description: ID of the feature to assign
+          example: 3
+        is_active:
+          type: boolean
+          default: true
+
+    ToggleFeatureRequest:
+      type: object
+      required:
+        - is_active
+      properties:
+        is_active:
+          type: boolean
+          example: false
+          description: Set true to enable, false to disable the feature on this plan
+
+    # ── Plan Limit ────────────────────────────────────────────────────────────
+    PlanLimit:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        plan_id:
+          type: integer
+          format: int64
+          example: 2
+        limit_key:
+          type: string
+          example: max_users
+          description: >
+            Limit identifier key. Common values:
+            max_users, max_workspaces, max_channels, max_meetings_per_month.
+        limit_value:
+          type: integer
+          format: int64
+          example: 50
+          description: Set to 9999 to represent "Unlimited" in the UI.
+        created_at:
+          type: string
+          format: date-time
+
+    AddLimitRequest:
+      type: object
+      required:
+        - limit_key
+        - limit_value
+      properties:
+        limit_key:
+          type: string
+          example: max_users
+          description: >
+            Snake_case limit identifier. E.g. max_users,
+            max_workspaces, max_channels, max_meetings_per_month.
+        limit_value:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 50
+          description: Set to 9999 to represent "Unlimited".
+
+    UpdateLimitRequest:
+      type: object
+      required:
+        - limit_value
+      properties:
+        limit_value:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 100
+          description: Set to 9999 to represent "Unlimited".
+
+    # ── Organization ──────────────────────────────────────────────────────────
+    Organization:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        schema_name:
+          type: string
+          example: org_acme_com
+          description: >
+            PostgreSQL schema name — auto-generated from domain on creation.
+            Format: org_ + domain with non-alphanumeric chars replaced by underscores.
+        name:
+          type: string
+          example: Acme Corporation
+        display_name:
+          type: string
+          example: Acme Corp
+        logo:
+          type: string
+          nullable: true
+          example: "https://cdn.acme.com/logo.png"
+        domain:
+          type: string
+          example: acme.com
+          description: >
+            Corporate domain used for silent login routing.
+            Free/personal domains (gmail, yahoo, etc.) are rejected.
+        official_email:
+          type: string
+          format: email
+          example: info@acme.com
+          description: >
+            Company official contact inbox (e.g. info@acme.com).
+            Receives the org-created confirmation email.
+            Not tied to any individual user account.
+        primary_owner_email:
+          type: string
+          format: email
+          example: jane@acme.com
+          description: >
+            Email of the org super admin. Reference field only —
+            the actual user row lives in <schema_name>.users.
+        plan_id:
+          type: integer
+          format: int64
+          example: 2
+          description: Every organisation must be on a plan. Required on creation.
+        subscription_status:
+          type: string
+          enum: [active, trial, inactive, cancelled, suspended, expired]
+          example: trial
+          description: Starts as "trial" on creation. Changes to "active" when plan is assigned/confirmed.
+        subscription_start_date:
+          type: string
+          format: date-time
+          nullable: true
+        subscription_end_date:
+          type: string
+          format: date-time
+          nullable: true
+        current_users_count:
+          type: integer
+          example: 1
+          description: Incremented automatically as org users are created.
+        current_workspaces_count:
+          type: integer
+          example: 0
+        current_channels_count:
+          type: integer
+          example: 0
+        current_meetings_this_month_count:
+          type: integer
+          example: 0
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrganizationRequest:
+      type: object
+      required:
+        - name
+        - display_name
+        - domain
+        - official_email
+        - plan_id
+        - owner_first_name
+        - owner_last_name
+        - primary_owner_email
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          example: Acme Corporation
+        display_name:
+          type: string
+          maxLength: 100
+          example: Acme Corp
+        domain:
+          type: string
+          maxLength: 100
+          example: acme.com
+          description: >
+            Corporate domain for auto-login routing. Must be lowercase.
+            Free/personal email domains (gmail.com, yahoo.com, etc.) are rejected.
+            Owner email must belong to this domain.
+        official_email:
+          type: string
+          format: email
+          example: info@acme.com
+          description: >
+            Company official contact inbox. Receives the org-created confirmation email.
+            Does not need to match the domain.
+        logo:
+          type: string
+          nullable: true
+          example: "https://cdn.acme.com/logo.png"
+        plan_id:
+          type: integer
+          format: int64
+          example: 2
+          description: Required. Every org must be on a plan from day one.
+        owner_first_name:
+          type: string
+          maxLength: 50
+          example: Jane
+          description: First name of the org super admin user.
+        owner_last_name:
+          type: string
+          maxLength: 50
+          example: Smith
+          description: Last name of the org super admin user.
+        primary_owner_email:
+          type: string
+          format: email
+          example: jane@acme.com
+          description: >
+            Work email of the org super admin. Must belong to the org domain (@acme.com).
+            A temporary password is auto-generated and emailed here.
+            The owner must change it on first login.
+        subscription_end_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2027-01-01T00:00:00Z"
+
+    UpdateOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        display_name:
+          type: string
+          maxLength: 100
+        logo:
+          type: string
+          nullable: true
+        domain:
+          type: string
+          maxLength: 100
+        official_email:
+          type: string
+          format: email
+
+    AssignPlanRequest:
+      type: object
+      required:
+        - plan_id
+      properties:
+        plan_id:
+          type: integer
+          format: int64
+          example: 3
+        subscription_end_date:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-12-31T23:59:59Z"
+
+    # ── Bulk Operations — Shared Response Schema ──────────────────────────────
+    BulkFeatureResponse:
+      type: object
+      properties:
+        successful:
+          type: array
+          items:
+            $ref: "#/components/schemas/Feature"
+        failed:
+          type: array
+          items:
+            type: object
+            properties:
+              item:
+                type: object
+              error:
+                type: string
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 5
+            successful:
+              type: integer
+              example: 4
+            failed:
+              type: integer
+              example: 1
+
+    # ── Bulk Roles ────────────────────────────────────────────────────────────
+    BulkCreateRoleItem:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: custom_admin
+        description:
+          type: string
+          example: "Custom admin privileged role"
+        is_system:
+          type: boolean
+          default: true
+
+    BulkCreateRoleRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkCreateRoleItem"
+
+    BulkUpdateRoleItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+        is_system:
+          type: boolean
+
+    BulkUpdateRoleRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkUpdateRoleItem"
+
+    BulkDeleteRoleRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Users ────────────────────────────────────────────────────────────
+    BulkCreateUserItem:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - email
+        - password
+        - role_id
+      properties:
+        first_name:
+          type: string
+          maxLength: 50
+          example: John
+        last_name:
+          type: string
+          maxLength: 50
+          example: Doe
+        email:
+          type: string
+          format: email
+          example: john.doe@gmail.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "StrongPass@123"
+        role_id:
+          type: integer
+          example: 2
+        is_active:
+          type: boolean
+          default: true
+
+    BulkCreateUserRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkCreateUserItem"
+
+    BulkUpdateUserItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        first_name:
+          type: string
+          maxLength: 50
+        last_name:
+          type: string
+          maxLength: 50
+        email:
+          type: string
+          format: email
+        role_id:
+          type: integer
+        is_active:
+          type: boolean
+
+    BulkUpdateUserRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkUpdateUserItem"
+
+    BulkDeleteUserRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Plans ────────────────────────────────────────────────────────────
+    BulkCreatePlanItem:
+      type: object
+      required:
+        - name
+        - price
+        - billing_cycle
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: Starter
+        description:
+          type: string
+          example: "For small teams"
+        price:
+          type: number
+          format: double
+          minimum: 0
+          example: 199.00
+        billing_cycle:
+          type: string
+          enum: [monthly, yearly, lifetime]
+          example: monthly
+        is_active:
+          type: boolean
+          default: true
+
+    BulkCreatePlanRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkCreatePlanItem"
+
+    BulkUpdatePlanItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+          minimum: 0
+        billing_cycle:
+          type: string
+          enum: [monthly, yearly, lifetime]
+        is_active:
+          type: boolean
+
+    BulkUpdatePlanRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkUpdatePlanItem"
+
+    BulkDeletePlanRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Features ─────────────────────────────────────────────────────────
+    BulkCreateFeatureItem:
+      type: object
+      required:
+        - feature_key
+        - name
+      properties:
+        feature_key:
+          type: string
+          maxLength: 100
+          example: video_meetings
+        name:
+          type: string
+          maxLength: 100
+          example: Video Meetings
+        description:
+          type: string
+          nullable: true
+          example: "Allows scheduling and joining video meetings"
+        is_active:
+          type: boolean
+          default: true
+
+    BulkCreateFeatureRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkCreateFeatureItem"
+          example:
+            - feature_key: video_meetings
+              name: Video Meetings
+              description: "Allows scheduling and joining video meetings"
+            - feature_key: screen_share
+              name: Screen Sharing
+
+    BulkUpdateFeatureItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        feature_key:
+          type: string
+          maxLength: 100
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        is_active:
+          type: boolean
+
+    BulkUpdateFeatureRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkUpdateFeatureItem"
+          example:
+            - id: 1
+              name: Updated Video Meetings
+              is_active: true
+            - id: 2
+              is_active: false
+
+    BulkDeleteFeatureRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Plan Features ────────────────────────────────────────────────────
+    BulkAssignPlanFeatureItem:
+      type: object
+      required:
+        - feature_id
+      properties:
+        feature_id:
+          type: integer
+          format: int64
+          example: 3
+        is_active:
+          type: boolean
+          default: true
+
+    BulkAssignPlanFeatureRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkAssignPlanFeatureItem"
+
+    BulkRemovePlanFeatureRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Plan Limits ──────────────────────────────────────────────────────
+    BulkAddPlanLimitItem:
+      type: object
+      required:
+        - limit_key
+        - limit_value
+      properties:
+        limit_key:
+          type: string
+          maxLength: 100
+          example: max_users
+        limit_value:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 50
+
+    BulkAddPlanLimitRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkAddPlanLimitItem"
+
+    BulkDeletePlanLimitRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    # ── Bulk Organizations ────────────────────────────────────────────────────
+    BulkUpdateOrganizationItem:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          maxLength: 120
+        display_name:
+          type: string
+          maxLength: 100
+        logo:
+          type: string
+          nullable: true
+        domain:
+          type: string
+          maxLength: 100
+        official_email:
+          type: string
+          format: email
+
+    BulkUpdateOrganizationRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkUpdateOrganizationItem"
+
+    BulkDeleteOrganizationRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: integer
+            format: int64
+          example: [1, 2, 3]
+
+    BulkAssignPlanItem:
+      type: object
+      required:
+        - id
+        - plan_id
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+          description: Organization ID
+        plan_id:
+          type: integer
+          format: int64
+          example: 2
+
+    BulkAssignPlanRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BulkAssignPlanItem"
+
+  responses:
+    UnauthorizedError:
+      description: Missing or invalid access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            status:
+              response_code: 401
+              response_message: "Something went wrong!"
+            message: "Access token is required."
+
+    ForbiddenError:
+      description: Authenticated but insufficient permissions (wrong context)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            status:
+              response_code: 403
+              response_message: "Something went wrong!"
+            message: "This route is only accessible to master users."
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    BadRequestError:
+      description: Validation error or bad input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    ServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    # ── Organization / Profile ────────────────────────────────────────────────
+    OrgStats:
+      type: object
+      properties:
+        totalMembers:
+          type: integer
+          example: 12
+        activeMembers:
+          type: integer
+          example: 10
+        pendingInvitations:
+          type: integer
+          example: 3
+        totalWorkspaces:
+          type: integer
+          example: 4
+        totalChannels:
+          type: integer
+          example: 18
+
+    PlanLimitWithUsage:
+      type: object
+      properties:
+        limit_key:
+          type: string
+          example: max_workspaces
+        limit_value:
+          type: integer
+          example: 10
+          description: -1 means unlimited
+        current_value:
+          type: integer
+          example: 4
+
+    UpdateOrgSettingsRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          example: Acme Corporation
+        display_name:
+          type: string
+          maxLength: 100
+          example: Acme Corp
+        logo:
+          type: string
+          nullable: true
+          example: "https://cdn.acme.com/logo-v2.png"
+        official_email:
+          type: string
+          format: email
+          example: hello@acme.com
+
+    # ── Organization / Roles ──────────────────────────────────────────────────
+    OrgRole:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: organization_admin
+        description:
+          type: string
+          nullable: true
+          example: "Can manage org settings, users, and workspaces"
+        is_system:
+          type: boolean
+          example: true
+          description: System roles (organization_super_admin, organization_admin, organization_member) cannot be modified or deleted.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrgRoleRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 70
+          example: department_manager
+        description:
+          type: string
+          nullable: true
+          example: "Can manage their department's channels and members"
+
+    UpdateOrgRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+          nullable: true
+
+    # ── Organization / Users ──────────────────────────────────────────────────
+    OrgUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        first_name:
+          type: string
+          example: Alex
+        last_name:
+          type: string
+          example: Johnson
+        email:
+          type: string
+          format: email
+          example: alex@acme.com
+        is_active:
+          type: boolean
+          example: true
+        is_deleted:
+          type: boolean
+          example: false
+        must_change_password:
+          type: boolean
+          example: false
+        last_login:
+          type: string
+          format: date-time
+          nullable: true
+        Role:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+              example: organization_member
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ── Organization / Invitations ────────────────────────────────────────────
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        email:
+          type: string
+          format: email
+          example: alex@acme.com
+        role_id:
+          type: integer
+          example: 3
+        status:
+          type: string
+          enum: [pending, accepted, cancelled, expired, rejected]
+          example: pending
+        expires_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        invited_by_id:
+          type: integer
+          nullable: true
+        InvitedBy:
+          nullable: true
+          type: object
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    SendInvitationRequest:
+      type: object
+      required:
+        - email
+        - role_id
+      properties:
+        email:
+          type: string
+          format: email
+          example: alex.johnson@acme.com
+        role_id:
+          type: integer
+          format: int64
+          example: 3
+          description: ID of the org role to assign on acceptance
+
+    AcceptInvitationRequest:
+      type: object
+      required:
+        - token
+        - tenant_schema
+        - first_name
+        - last_name
+        - password
+      properties:
+        token:
+          type: string
+          description: Invitation token from the `?token=` query param in the invite link
+          example: "a3f7c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
+        tenant_schema:
+          type: string
+          description: Org tenant schema name from the `?schema=` query param in the invite link
+          example: "org_acme_com"
+        first_name:
+          type: string
+          maxLength: 50
+          example: Alex
+        last_name:
+          type: string
+          maxLength: 50
+          example: Johnson
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "MySecure@Pass1"
+
+    # ── Workspace ─────────────────────────────────────────────────────────────
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: Engineering
+        description:
+          type: string
+          nullable: true
+          example: "All things engineering"
+        created_by_id:
+          type: integer
+          format: int64
+          example: 2
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWorkspaceRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Engineering
+        description:
+          type: string
+          nullable: true
+          example: "All things engineering"
+
+    UpdateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Engineering Team
+        description:
+          type: string
+          nullable: true
+
+    # ── Workspace Members ─────────────────────────────────────────────────────
+    WorkspaceMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        workspace_id:
+          type: integer
+          format: int64
+          example: 1
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          example: workspace_member
+        User:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+            is_active:
+              type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    AddWorkspaceMemberRequest:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+          description: ID of the org user to add to this workspace
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          default: workspace_member
+          example: workspace_member
+
+    UpdateWorkspaceMemberRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [workspace_owner, workspace_admin, workspace_member]
+          example: workspace_admin
+
+    # ── Channels ──────────────────────────────────────────────────────────────
+    Channel:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: general
+          description: Always lowercase (normalised on create/update)
+        description:
+          type: string
+          nullable: true
+          example: "General discussion for everyone"
+        workspace_id:
+          type: integer
+          format: int64
+          example: 1
+        type:
+          type: string
+          enum: [public, private]
+          example: public
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateChannelRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: announcements
+          description: Will be lowercased automatically
+        description:
+          type: string
+          nullable: true
+          example: "Company-wide announcements"
+        type:
+          type: string
+          enum: [public, private]
+          default: public
+          example: public
+        member_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          nullable: true
+          description: Initial member user IDs (only used for private channels)
+          example: [5, 7, 8]
+
+    UpdateChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: announcements-v2
+        description:
+          type: string
+          nullable: true
+
+    # ── Channel Members ────────────────────────────────────────────────────────
+    ChannelMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        channel_id:
+          type: integer
+          format: int64
+          example: 3
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+        User:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AddChannelMemberRequest:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          example: 5
+          description: Must be a member of the parent workspace
+
+paths:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # COMMON — Health
+  # ═══════════════════════════════════════════════════════════════════════════
+  /health:
+    get:
+      tags: [Common / Health]
+      summary: Health check
+      description: Returns server status, uptime and current timestamp. No auth required.
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: healthy
+                          timestamp:
+                            type: string
+                            format: date-time
+                          uptime:
+                            type: number
+                            example: 3600.5
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # COMMON — Auth
+  # ═══════════════════════════════════════════════════════════════════════════
+  /auth/login:
+    post:
+      tags: [Common / Auth]
+      summary: Login (unified — master & org)
+      description: |
+        Single login endpoint for all user types.
+
+        **Domain-based silent routing:**
+        - Free/personal domain (gmail, yahoo, etc.) → master_users table
+        - Corporate/edu domain with registered org → org tenant schema table
+        - Corporate/edu domain with no registered org → fallback to master_users
+
+        On success returns accessToken (1d TTL), refreshToken (7d / 30d with rememberMe).
+
+        **must_change_password:** If true in the response, the frontend must show a
+        forced password-change screen before allowing further navigation. This is set
+        for org owners on first login since their password was auto-generated.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              masterUser:
+                summary: Master user (free email domain)
+                value:
+                  email: admin@gmail.com
+                  password: "StrongPass@123"
+                  rememberMe: false
+              orgOwner:
+                summary: Org owner (first login with temp password)
+                value:
+                  email: jane@acme.com
+                  password: "TempAuto@123"
+                  rememberMe: false
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /auth/logout:
+    post:
+      tags: [Common / Auth]
+      summary: Logout
+      description: Revokes the supplied refresh token from the database.
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /auth/refresh-token:
+    post:
+      tags: [Common / Auth]
+      summary: Refresh access token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          accessToken:
+                            type: string
+                          refreshToken:
+                            type: string
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /auth/forgot-password:
+    post:
+      tags: [Common / Auth]
+      summary: Forgot password — send reset link
+      description: |
+        Triggers a password-reset email.
+        Always returns 200 regardless of whether the email exists — prevents user enumeration.
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Reset link sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  /auth/reset-password:
+    post:
+      tags: [Common / Auth]
+      summary: Reset password
+      description: |
+        Resets the password using the token from the email link.
+        Token is valid for 15 minutes.
+        Also used by org owners to set their permanent password after first login.
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # COMMON — Account
+  # ═══════════════════════════════════════════════════════════════════════════
+  /account/get-profile:
+    get:
+      tags: [Common / Account]
+      summary: Get profile
+      description: >
+        Returns the authenticated user's profile.
+        Works for both master users and org users.
+        Sensitive fields (password, reset tokens) are excluded.
+      operationId: getProfile
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /account/update-profile:
+    post:
+      tags: [Common / Account]
+      summary: Update profile
+      description: >
+        Updates non-sensitive profile fields (first_name, last_name).
+        Sensitive fields (password, role_id, is_active) are silently ignored.
+      operationId: updateProfile
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+            example:
+              first_name: Jane
+              last_name: Updated
+      responses:
+        "200":
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /account/change-password:
+    put:
+      tags: [Common / Account]
+      summary: Change password
+      description: >
+        Verifies the current password then updates to the new password.
+        Use this for voluntary password changes.
+        For forced first-login password change (must_change_password = true),
+        use POST /auth/reset-password with the temp password as the token flow,
+        or call this endpoint with the temp password as currentPassword.
+      operationId: changePassword
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+            example:
+              currentPassword: "TempAutoPass@1"
+              newPassword: "MyNewPass@456"
+      responses:
+        "200":
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MASTER — Roles
+  # ═══════════════════════════════════════════════════════════════════════════
+  /master/roles/get-all-roles:
+    get:
+      tags: [Master / Roles]
+      summary: Get all roles
+      operationId: getAllRoles
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+      responses:
+        "200":
+          description: Roles retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Role"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/roles/get-role-by-id/{id}:
+    get:
+      tags: [Master / Roles]
+      summary: Get role by ID
+      operationId: getRoleById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Role"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/roles/create-role:
+    post:
+      tags: [Master / Roles]
+      summary: Create a role
+      operationId: createRole
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleRequest"
+            example:
+              name: master_admin
+              description: "Full access to master panel"
+              is_system: true
+      responses:
+        "201":
+          description: Role created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/roles/update-role/{id}:
+    patch:
+      tags: [Master / Roles]
+      summary: Update a role
+      operationId: updateRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleRequest"
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/roles/delete-role/{id}:
+    delete:
+      tags: [Master / Roles]
+      summary: Soft delete a role
+      operationId: deleteRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Role Operations ──────────────────────────────────────────────────
+  /master/roles/bulk-create:
+    post:
+      tags: [Master / Roles]
+      summary: Bulk create roles
+      description: |
+        Create multiple roles in a single request.
+        **Limits:** Maximum 100 items. Each name must be unique.
+      operationId: bulkCreateRoles
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateRoleRequest"
+      responses:
+        "200":
+          description: Bulk create completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Role"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/roles/bulk-update:
+    patch:
+      tags: [Master / Roles]
+      summary: Bulk update roles
+      description: |
+        Update multiple roles in a single request.
+        Each item must include an `id`. Other fields are optional.
+        **Limits:** Maximum 100 items.
+      operationId: bulkUpdateRoles
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateRoleRequest"
+      responses:
+        "200":
+          description: Bulk update completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/roles/bulk-delete:
+    delete:
+      tags: [Master / Roles]
+      summary: Bulk delete roles
+      description: |
+        Soft delete multiple roles by ID.
+        **Limits:** Maximum 100 IDs.
+      operationId: bulkDeleteRoles
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeleteRoleRequest"
+      responses:
+        "200":
+          description: Bulk delete completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MASTER — Users
+  # ═══════════════════════════════════════════════════════════════════════════
+  /master/users/get-all-users:
+    get:
+      tags: [Master / Users]
+      summary: Get all master users
+      operationId: getAllUsers
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+        - name: role_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 2
+      responses:
+        "200":
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MasterUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/users/get-user-by-id/{id}:
+    get:
+      tags: [Master / Users]
+      summary: Get master user by ID
+      operationId: getUserById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MasterUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/users/create-user:
+    post:
+      tags: [Master / Users]
+      summary: Create a master user
+      operationId: createUser
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+            example:
+              first_name: Jane
+              last_name: Smith
+              email: jane.smith@gmail.com
+              password: "StrongPass@123"
+              role_id: 2
+              is_active: true
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MasterUser"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/users/update-user/{id}:
+    patch:
+      tags: [Master / Users]
+      summary: Update a master user
+      operationId: updateUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MasterUser"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/users/delete-user/{id}:
+    delete:
+      tags: [Master / Users]
+      summary: Soft delete a master user
+      operationId: deleteUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk User Operations ─────────────────────────────────────────────────
+  /master/users/bulk-create:
+    post:
+      tags: [Master / Users]
+      summary: Bulk create master users
+      description: |
+        Create multiple MeetFlow internal staff accounts in a single request.
+        **Limits:** Maximum 100 items. Each email must be unique.
+      operationId: bulkCreateUsers
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateUserRequest"
+      responses:
+        "200":
+          description: Bulk create completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/MasterUser"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/users/bulk-update:
+    patch:
+      tags: [Master / Users]
+      summary: Bulk update master users
+      description: |
+        Update multiple MeetFlow internal staff accounts in a single request.
+        Each item must include an `id`.
+        **Limits:** Maximum 100 items.
+      operationId: bulkUpdateUsers
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateUserRequest"
+      responses:
+        "200":
+          description: Bulk update completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/users/bulk-delete:
+    delete:
+      tags: [Master / Users]
+      summary: Bulk delete master users
+      description: |
+        Soft delete multiple MeetFlow internal staff accounts by ID.
+        **Limits:** Maximum 100 IDs.
+      operationId: bulkDeleteUsers
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeleteUserRequest"
+      responses:
+        "200":
+          description: Bulk delete completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MASTER — Plans
+  # ═══════════════════════════════════════════════════════════════════════════
+  /master/plans/get-all-plans:
+    get:
+      tags: [Master / Plans]
+      summary: Get all plans
+      operationId: getAllPlans
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+        - name: billing_cycle
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [monthly, yearly, lifetime]
+      responses:
+        "200":
+          description: Plans retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Plan"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/plans/get-plan-by-id/{id}:
+    get:
+      tags: [Master / Plans]
+      summary: Get plan by ID
+      operationId: getPlanById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Plan retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Plan"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/create-plan:
+    post:
+      tags: [Master / Plans]
+      summary: Create a plan
+      operationId: createPlan
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlanRequest"
+            example:
+              name: Pro
+              description: "Best for growing teams"
+              price: 29.99
+              billing_cycle: monthly
+              is_active: true
+      responses:
+        "201":
+          description: Plan created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/plans/update-plan/{id}:
+    patch:
+      tags: [Master / Plans]
+      summary: Update a plan
+      operationId: updatePlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlanRequest"
+      responses:
+        "200":
+          description: Plan updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/delete-plan/{id}:
+    delete:
+      tags: [Master / Plans]
+      summary: Soft delete a plan
+      operationId: deletePlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Plan deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Plan Operations ─────────────────────────────────────────────────
+  /master/plans/bulk-create:
+    post:
+      tags: [Master / Plans]
+      summary: Bulk create plans
+      description: |
+        Create multiple subscription plans in a single request.
+        **Limits:** Maximum 100 items. Each plan name must be unique.
+      operationId: bulkCreatePlans
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreatePlanRequest"
+      responses:
+        "200":
+          description: Bulk create completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Plan"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/plans/bulk-update:
+    patch:
+      tags: [Master / Plans]
+      summary: Bulk update plans
+      description: |
+        Update multiple subscription plans in a single request.
+        Each item must include an `id`.
+        **Limits:** Maximum 100 items.
+      operationId: bulkUpdatePlans
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdatePlanRequest"
+      responses:
+        "200":
+          description: Bulk update completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/plans/bulk-delete:
+    delete:
+      tags: [Master / Plans]
+      summary: Bulk delete plans
+      description: |
+        Soft delete multiple subscription plans by ID.
+        **Limits:** Maximum 100 IDs.
+      operationId: bulkDeletePlans
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeletePlanRequest"
+      responses:
+        "200":
+          description: Bulk delete completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ── Plan Features (sub-resource) ──────────────────────────────────────────
+  /master/plans/get-plan-features/{planId}:
+    get:
+      tags: [Master / Plan Features]
+      summary: Get features assigned to a plan
+      operationId: getFeaturesByPlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      responses:
+        "200":
+          description: Plan features retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PlanFeature"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/assign-plan-feature/{planId}:
+    post:
+      tags: [Master / Plan Features]
+      summary: Assign a feature to a plan
+      operationId: assignFeature
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignFeatureRequest"
+            example:
+              feature_id: 3
+              is_active: true
+      responses:
+        "201":
+          description: Feature assigned successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PlanFeature"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/toggle-plan-feature/{planId}/{featureId}:
+    patch:
+      tags: [Master / Plan Features]
+      summary: Toggle a feature on a plan (enable / disable)
+      operationId: toggleFeature
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+        - name: featureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToggleFeatureRequest"
+            example:
+              is_active: false
+      responses:
+        "200":
+          description: Feature toggled successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PlanFeature"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/remove-plan-feature/{planId}/{featureId}:
+    delete:
+      tags: [Master / Plan Features]
+      summary: Remove a feature from a plan
+      operationId: removeFeature
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+        - name: featureId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      responses:
+        "200":
+          description: Feature removed from plan successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Plan Feature Operations ──────────────────────────────────────────
+  /master/plans/bulk-assign-features/{planId}:
+    post:
+      tags: [Master / Plan Features]
+      summary: Bulk assign features to a plan
+      description: |
+        Assign multiple features to a plan in a single request.
+        **Limits:** Maximum 100 items. Each feature_id must be unique in the request.
+      operationId: bulkAssignFeatures
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          description: ID of the plan
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkAssignPlanFeatureRequest"
+            example:
+              items:
+                - feature_id: 1
+                  is_active: true
+                - feature_id: 2
+                  is_active: true
+                - feature_id: 3
+                  is_active: false
+      responses:
+        "200":
+          description: Bulk assign completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PlanFeature"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/bulk-remove-features/{planId}:
+    delete:
+      tags: [Master / Plan Features]
+      summary: Bulk remove features from a plan
+      description: |
+        Remove multiple features from a plan by feature IDs.
+        **Limits:** Maximum 100 feature IDs per request.
+      operationId: bulkRemoveFeatures
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          description: ID of the plan
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRemovePlanFeatureRequest"
+            example:
+              ids: [1, 2, 3]
+      responses:
+        "200":
+          description: Bulk remove completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ── Plan Limits (sub-resource) ────────────────────────────────────────────
+  /master/plans/get-plan-limits/{planId}:
+    get:
+      tags: [Master / Plan Limits]
+      summary: Get limits for a plan
+      operationId: getLimitsByPlan
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      responses:
+        "200":
+          description: Plan limits retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PlanLimit"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/add-plan-limit/{planId}:
+    post:
+      tags: [Master / Plan Limits]
+      summary: Add a limit to a plan
+      description: |
+        Common limit_key values: max_users, max_workspaces, max_channels, max_meetings_per_month.
+        Set limit_value to 9999 to represent "Unlimited" in the UI.
+      operationId: addLimit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddLimitRequest"
+            example:
+              limit_key: max_users
+              limit_value: 50
+      responses:
+        "201":
+          description: Limit added successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PlanLimit"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/update-plan-limit/{planId}/{limitId}:
+    patch:
+      tags: [Master / Plan Limits]
+      summary: Update a plan limit
+      operationId: updateLimit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+        - name: limitId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLimitRequest"
+            example:
+              limit_value: 100
+      responses:
+        "200":
+          description: Limit updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PlanLimit"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/delete-plan-limit/{planId}/{limitId}:
+    delete:
+      tags: [Master / Plan Limits]
+      summary: Delete a plan limit
+      operationId: deleteLimit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 2
+        - name: limitId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      responses:
+        "200":
+          description: Limit deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Plan Limit Operations ────────────────────────────────────────────
+  /master/plans/bulk-add-limits/{planId}:
+    post:
+      tags: [Master / Plan Limits]
+      summary: Bulk add limits to a plan
+      description: |
+        Add multiple quantitative limits to a plan in a single request.
+        This is the recommended way to seed all limits for a plan at once.
+
+        **Common limit_key values:**
+        `max_members`, `max_workspaces`, `max_channels_per_workspace`,
+        `max_meetings_per_month`, `max_meeting_duration_minutes`,
+        `max_meeting_participants`, `max_file_storage_mb`,
+        `message_history_days`, `max_guests`, `max_ai_queries_per_month`.
+
+        **Limits:** Maximum 100 items. Each limit_key must be unique in the request.
+      operationId: bulkAddLimits
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          description: ID of the plan
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkAddPlanLimitRequest"
+            example:
+              items:
+                - limit_key: max_members
+                  limit_value: 100
+                - limit_key: max_workspaces
+                  limit_value: 10
+                - limit_key: max_meetings_per_month
+                  limit_value: 200
+                - limit_key: message_history_days
+                  limit_value: -1
+      responses:
+        "200":
+          description: Bulk add limits completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PlanLimit"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/plans/bulk-delete-limits/{planId}:
+    delete:
+      tags: [Master / Plan Limits]
+      summary: Bulk delete limits from a plan
+      description: |
+        Delete multiple limits from a plan by limit IDs.
+        **Limits:** Maximum 100 limit IDs per request.
+      operationId: bulkDeleteLimits
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          description: ID of the plan
+          schema:
+            type: integer
+            format: int64
+            example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeletePlanLimitRequest"
+            example:
+              ids: [1, 2, 3]
+      responses:
+        "200":
+          description: Bulk delete limits completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MASTER — Features
+  # ═══════════════════════════════════════════════════════════════════════════
+  /master/features/get-all-features:
+    get:
+      tags: [Master / Features]
+      summary: Get all features
+      operationId: getAllFeatures
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+      responses:
+        "200":
+          description: Features retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Feature"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/features/get-feature-by-id/{id}:
+    get:
+      tags: [Master / Features]
+      summary: Get feature by ID
+      operationId: getFeatureById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Feature retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Feature"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/features/create-feature:
+    post:
+      tags: [Master / Features]
+      summary: Create a feature
+      description: Adds a new feature to the global catalogue. feature_key must be unique.
+      operationId: createFeature
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFeatureRequest"
+            example:
+              feature_key: video_meetings
+              name: Video Meetings
+              description: "Allows scheduling and joining video meetings"
+              is_active: true
+      responses:
+        "201":
+          description: Feature created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Feature"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/features/update-feature/{id}:
+    patch:
+      tags: [Master / Features]
+      summary: Update a feature
+      operationId: updateFeature
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFeatureRequest"
+      responses:
+        "200":
+          description: Feature updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Feature"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/features/delete-feature/{id}:
+    delete:
+      tags: [Master / Features]
+      summary: Soft delete a feature
+      operationId: deleteFeature
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Feature deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Feature Operations ─────────────────────────────────────────────
+  /master/features/bulk-create:
+    post:
+      tags: [Master / Features]
+      summary: Bulk create features
+      description: |
+        Create multiple features in the global catalogue in a single request.
+        On partial failure, successful items are created and failed items are returned with error details.
+        **Limits:** Maximum 100 items. Each feature_key must be unique.
+      operationId: bulkCreateFeatures
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateFeatureRequest"
+      responses:
+        "200":
+          description: Bulk create completed (may include partial failures)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/BulkFeatureResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/features/bulk-update:
+    patch:
+      tags: [Master / Features]
+      summary: Bulk update features
+      description: |
+        Update multiple features in a single request.
+        Each item must include an `id`. Other fields are optional.
+        On partial failure, successful items are updated and failed items are returned with error details.
+        **Limits:** Maximum 100 items.
+      operationId: bulkUpdateFeatures
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateFeatureRequest"
+      responses:
+        "200":
+          description: Bulk update completed (may include partial failures)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/BulkFeatureResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/features/bulk-delete:
+    delete:
+      tags: [Master / Features]
+      summary: Bulk delete features
+      description: |
+        Soft delete multiple features by ID in a single request.
+        **Limits:** Maximum 100 IDs.
+      operationId: bulkDeleteFeatures
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeleteFeatureRequest"
+      responses:
+        "200":
+          description: Bulk delete completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              type: integer
+                              format: int64
+                            example: [1, 2, 3]
+                          failed:
+                            type: array
+                            example: []
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MASTER — Organizations
+  # ═══════════════════════════════════════════════════════════════════════════
+  /master/organizations/get-all-organizations:
+    get:
+      tags: [Master / Organizations]
+      summary: Get all organizations
+      operationId: getAllOrganizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+        - name: subscription_status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, trial, inactive, cancelled, suspended, expired]
+        - name: plan_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 2
+      responses:
+        "200":
+          description: Organizations retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Organization"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/get-organization-by-id/{id}:
+    get:
+      tags: [Master / Organizations]
+      summary: Get organization by ID
+      operationId: getOrganizationById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Organization retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/organizations/create-organization:
+    post:
+      tags: [Master / Organizations]
+      summary: Create / provision an organization
+      description: |
+        Full org provisioning in one request:
+
+        1. Creates the org record in master_tenant.organizations
+        2. Provisions the PostgreSQL tenant schema
+        3. Seeds default roles (organization_super_admin, organization_admin, organization_member)
+        4. Creates the org super admin user in <schema_name>.users with an auto-generated password
+        5. Sends two emails:
+           - **Official email** (official_email): org confirmation with domain, plan, schema details
+           - **Owner email** (primary_owner_email): temporary login credentials
+
+        The owner's must_change_password flag is set to true — the frontend must
+        redirect them to change their password immediately after first login.
+
+        owner_password is NOT accepted — it is always auto-generated by the server.
+      operationId: createOrganization
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+            example:
+              name: Tech Echelons Pvt Ltd
+              display_name: TechEchelons
+              domain: techechelons.com
+              official_email: info@techechelons.com
+              owner_first_name: Adesh
+              owner_last_name: Sharma
+              primary_owner_email: adesh@techechelons.com
+              plan_id: 2
+              logo: "https://cdn.techechelons.com/logo.png"
+      responses:
+        "201":
+          description: Organization created and schema provisioned successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/update-organization/{id}:
+    patch:
+      tags: [Master / Organizations]
+      summary: Update organization details
+      description: Updates name, display_name, logo, domain, or official_email. Domain uniqueness is validated.
+      operationId: updateOrganization
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationRequest"
+      responses:
+        "200":
+          description: Organization updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/organizations/activate-organization/{id}:
+    patch:
+      tags: [Master / Organizations]
+      summary: Activate an organization
+      operationId: activateOrganization
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Organization activated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/organizations/deactivate-organization/{id}:
+    patch:
+      tags: [Master / Organizations]
+      summary: Deactivate an organization
+      description: Sets is_active = false. Org users will be blocked from login.
+      operationId: deactivateOrganization
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Organization deactivated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/organizations/assign-plan-to-organization/{id}:
+    patch:
+      tags: [Master / Organizations]
+      summary: Assign a plan to an organization
+      description: >
+        Links a plan to the org and sets subscription_status to "active".
+        Also validates that the plan exists and is currently active.
+      operationId: assignPlanToOrganization
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignPlanRequest"
+            example:
+              plan_id: 3
+              subscription_end_date: "2026-12-31T23:59:59Z"
+      responses:
+        "200":
+          description: Plan assigned to organization successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /master/organizations/delete-organization/{id}:
+    delete:
+      tags: [Master / Organizations]
+      summary: Soft delete an organization
+      operationId: deleteOrganization
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Organization deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ─── Bulk Organization Operations ──────────────────────────────────────────
+  /master/organizations/bulk-update:
+    patch:
+      tags: [Master / Organizations]
+      summary: Bulk update organizations
+      description: |
+        Update multiple organizations in a single request.
+        Each item must include an `id`. Other fields are optional.
+        **Limits:** Maximum 100 items.
+      operationId: bulkUpdateOrganizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateOrganizationRequest"
+      responses:
+        "200":
+          description: Bulk update completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/bulk-delete:
+    delete:
+      tags: [Master / Organizations]
+      summary: Bulk delete organizations
+      description: |
+        Soft delete multiple organizations by ID.
+        **Limits:** Maximum 100 IDs.
+      operationId: bulkDeleteOrganizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDeleteOrganizationRequest"
+      responses:
+        "200":
+          description: Bulk delete completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/bulk-activate:
+    patch:
+      tags: [Master / Organizations]
+      summary: Bulk activate organizations
+      description: |
+        Activate multiple organizations at once (set is_active = true).
+        **Limits:** Maximum 100 organization IDs per request.
+      operationId: bulkActivateOrganizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - ids
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: integer
+                    format: int64
+                  example: [1, 2, 3]
+      responses:
+        "200":
+          description: Bulk activate completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/bulk-deactivate:
+    patch:
+      tags: [Master / Organizations]
+      summary: Bulk deactivate organizations
+      description: |
+        Deactivate multiple organizations at once (set is_active = false).
+        Organization users will be blocked from login.
+        **Limits:** Maximum 100 organization IDs per request.
+      operationId: bulkDeactivateOrganizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - ids
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: integer
+                    format: int64
+                  example: [1, 2, 3]
+      responses:
+        "200":
+          description: Bulk deactivate completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /master/organizations/bulk-assign-plan:
+    patch:
+      tags: [Master / Organizations]
+      summary: Bulk assign plans to organizations
+      description: |
+        Assign subscription plans to multiple organizations in a single request.
+        Each item must include an `id` (organization ID) and `plan_id`.
+        **Limits:** Maximum 100 items.
+      operationId: bulkAssignPlans
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkAssignPlanRequest"
+            example:
+              items:
+                - id: 1
+                  plan_id: 2
+                - id: 2
+                  plan_id: 3
+      responses:
+        "200":
+          description: Bulk assign plans completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          successful:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Organization"
+                          failed:
+                            type: array
+                          summary:
+                            type: object
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Profile
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/profile/get-org-profile:
+    get:
+      tags: [Organization / Profile]
+      summary: Get organization profile + dashboard stats
+      description: |
+        Returns the full org record (name, plan, subscription status) combined with
+        live dashboard stats (total members, active workspaces, channels, pending invites)
+        and the plan limits with current usage for each key.
+
+        This is the data source for the **Organization Dashboard home page**.
+        Requires org context (Bearer token of an org user).
+      operationId: getOrgProfile
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          organization:
+                            $ref: "#/components/schemas/Organization"
+                          stats:
+                            $ref: "#/components/schemas/OrgStats"
+                          plan_limits:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PlanLimitWithUsage"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/profile/update-org-settings:
+    patch:
+      tags: [Organization / Profile]
+      summary: Update organization settings
+      description: |
+        Updates editable org fields: `name`, `display_name`, `logo`, `official_email`.
+        Domain and plan changes are not allowed here — those are master-admin operations.
+      operationId: updateOrgSettings
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgSettingsRequest"
+            example:
+              display_name: Acme Corp v2
+              logo: "https://cdn.acme.com/logo-v2.png"
+      responses:
+        "200":
+          description: Organization settings updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Organization"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Roles
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/roles/get-all-roles:
+    get:
+      tags: [Organization / Roles]
+      summary: Get all org roles
+      operationId: getOrgRoles
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Roles retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/OrgRole"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/roles/get-role-by-id/{id}:
+    get:
+      tags: [Organization / Roles]
+      summary: Get org role by ID
+      operationId: getOrgRoleById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/roles/create-role:
+    post:
+      tags: [Organization / Roles]
+      summary: Create a custom org role
+      description: Creates a custom role in this org's tenant schema. System roles cannot be created via this endpoint.
+      operationId: createOrgRole
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrgRoleRequest"
+            example:
+              name: department_manager
+              description: "Can manage their department's channels and members"
+      responses:
+        "201":
+          description: Role created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: Role name already exists
+
+  /organization/roles/update-role/{id}:
+    patch:
+      tags: [Organization / Roles]
+      summary: Update a custom org role
+      description: Only custom (non-system) roles can be modified.
+      operationId: updateOrgRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgRoleRequest"
+      responses:
+        "200":
+          description: Role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgRole"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/roles/delete-role/{id}:
+    delete:
+      tags: [Organization / Roles]
+      summary: Delete a custom org role
+      description: Only custom (non-system) roles can be deleted.
+      operationId: deleteOrgRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Role deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Users
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/users/get-all-users:
+    get:
+      tags: [Organization / Users]
+      summary: Get all org users
+      operationId: getOrgUsers
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+        - name: role_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/OrgUser"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/users/get-user-by-id/{id}:
+    get:
+      tags: [Organization / Users]
+      summary: Get org user by ID
+      operationId: getOrgUserById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/activate-user/{id}:
+    patch:
+      tags: [Organization / Users]
+      summary: Activate an org user
+      operationId: activateOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User activated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/deactivate-user/{id}:
+    patch:
+      tags: [Organization / Users]
+      summary: Deactivate an org user
+      description: Cannot deactivate yourself or the org super admin.
+      operationId: deactivateOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User deactivated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/users/delete-user/{id}:
+    delete:
+      tags: [Organization / Users]
+      summary: Remove an org user (soft delete)
+      description: |
+        Soft-deletes the user from the org. Cannot remove yourself or the org super admin.
+        The user will no longer be able to log in to this org.
+      operationId: removeOrgUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: User removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ORGANIZATION — Invitations
+  # ═══════════════════════════════════════════════════════════════════════════
+  /organization/invitations/accept-invitation:
+    post:
+      tags: [Organization / Invitations]
+      summary: Accept an invitation (public — no auth needed)
+      description: |
+        Called when an invited user clicks the invite link in their email.
+        The invitation `token` comes from the `?token=` query param in the invite link.
+        The `tenant_schema` comes from the `?schema=` query param.
+
+        On success, creates the user account and returns basic profile info.
+        The user should then log in normally via POST /auth/login.
+      operationId: acceptInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInvitationRequest"
+            example:
+              token: "a3f7c2d1e4b5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
+              tenant_schema: "org_acme_com"
+              first_name: Alex
+              last_name: Johnson
+              password: "MySecure@Pass1"
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                          email:
+                            type: string
+                          first_name:
+                            type: string
+                          last_name:
+                            type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "409":
+          description: User already exists
+
+  /organization/invitations/get-all-invitations:
+    get:
+      tags: [Organization / Invitations]
+      summary: Get all invitations
+      operationId: getOrgInvitations
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, accepted, cancelled, expired, rejected]
+      responses:
+        "200":
+          description: Invitations retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Invitation"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /organization/invitations/send-invitation:
+    post:
+      tags: [Organization / Invitations]
+      summary: Send an invitation
+      description: |
+        Sends an email invitation to the provided address.
+        The invitation link contains a `?token=` and `?schema=` param that the frontend
+        must pass to POST /organization/invitations/accept-invitation.
+        Invitations expire after **7 days**.
+      operationId: sendInvitation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendInvitationRequest"
+            example:
+              email: alex.johnson@acme.com
+              role_id: 3
+      responses:
+        "201":
+          description: Invitation sent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: User already a member or invitation already pending
+
+  /organization/invitations/resend-invitation/{id}:
+    patch:
+      tags: [Organization / Invitations]
+      summary: Resend an invitation
+      description: Generates a new token, resets the expiry to 7 days from now, and resends the email.
+      operationId: resendInvitation
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Invitation resent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /organization/invitations/cancel-invitation/{id}:
+    delete:
+      tags: [Organization / Invitations]
+      summary: Cancel a pending invitation
+      operationId: cancelInvitation
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Invitation cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Workspaces
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/workspaces/my-workspaces:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get my workspaces
+      description: |
+        Returns all workspaces the authenticated user belongs to, each including
+        `my_role` (workspace_owner / workspace_admin / workspace_member).
+        This is the workspace selection screen shown after org login.
+      operationId: getMyWorkspaces
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Workspaces retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: "#/components/schemas/Workspace"
+                            - type: object
+                              properties:
+                                my_role:
+                                  type: string
+                                  enum:
+                                    [
+                                      workspace_owner,
+                                      workspace_admin,
+                                      workspace_member,
+                                    ]
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /workspace/workspaces/get-all-workspaces:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get all workspaces (admin)
+      description: Returns all workspaces in the org. Admin-only.
+      operationId: getAllWorkspaces
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+        - $ref: "#/components/parameters/QueryIsActive"
+      responses:
+        "200":
+          description: Workspaces retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Workspace"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /workspace/workspaces/get-workspace-by-id/{id}:
+    get:
+      tags: [Workspace / Workspaces]
+      summary: Get workspace by ID
+      description: The requesting user must be a member of the workspace.
+      operationId: getWorkspaceById
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Workspace retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/workspaces/create-workspace:
+    post:
+      tags: [Workspace / Workspaces]
+      summary: Create a workspace
+      description: |
+        Creates a new workspace. The creator is automatically added as `workspace_owner`.
+        A default **#general** public channel is auto-created and the creator is added to it.
+        Plan limit `max_workspaces` is enforced.
+      operationId: createWorkspace
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+            example:
+              name: Engineering
+              description: "All things engineering"
+      responses:
+        "201":
+          description: Workspace created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Plan workspace limit reached
+        "409":
+          description: Workspace name already exists
+
+  /workspace/workspaces/update-workspace/{id}:
+    patch:
+      tags: [Workspace / Workspaces]
+      summary: Update a workspace
+      description: Only the workspace owner or org admin can update workspace details.
+      operationId: updateWorkspace
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceRequest"
+      responses:
+        "200":
+          description: Workspace updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/workspaces/delete-workspace/{id}:
+    delete:
+      tags: [Workspace / Workspaces]
+      summary: Delete a workspace
+      description: Only the workspace owner or org super admin can delete a workspace.
+      operationId: deleteWorkspace
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Workspace deleted (deactivated) successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Workspace Members
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/members/get-all-members:
+    get:
+      tags: [Workspace / Members]
+      summary: Get all workspace members
+      operationId: getWorkspaceMembers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Members retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/WorkspaceMember"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/members/add-member:
+    post:
+      tags: [Workspace / Members]
+      summary: Add a member to a workspace
+      description: The user must already be an org member. Only org admins can add members.
+      operationId: addWorkspaceMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddWorkspaceMemberRequest"
+            example:
+              user_id: 5
+              role: workspace_member
+      responses:
+        "201":
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "409":
+          description: User is already a workspace member
+
+  /workspace/{workspaceId}/members/update-member/{userId}:
+    patch:
+      tags: [Workspace / Members]
+      summary: Update a member's workspace role
+      description: |
+        Changes the role of a workspace member.
+        Cannot change your own role. Cannot demote the workspace owner.
+      operationId: updateWorkspaceMemberRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceMemberRoleRequest"
+            example:
+              role: workspace_admin
+      responses:
+        "200":
+          description: Member role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/members/remove-member/{userId}:
+    delete:
+      tags: [Workspace / Members]
+      summary: Remove a member from a workspace
+      description: |
+        Cannot remove yourself (use leave workspace instead).
+        Cannot remove the workspace owner.
+      operationId: removeWorkspaceMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 5
+      responses:
+        "200":
+          description: Member removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Channels
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/channels/get-all-channels:
+    get:
+      tags: [Workspace / Channels]
+      summary: Get channels for user
+      description: |
+        Returns public channels + private channels where the user is a member.
+        The user must be a workspace member.
+      operationId: getChannelsForUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      responses:
+        "200":
+          description: Channels retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/get-channel-by-id/{channelId}:
+    get:
+      tags: [Workspace / Channels]
+      summary: Get channel by ID
+      description: For private channels, the user must be a member.
+      operationId: getChannelById
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      responses:
+        "200":
+          description: Channel retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/create-channel:
+    post:
+      tags: [Workspace / Channels]
+      summary: Create a channel
+      description: |
+        Creates a new channel in the workspace. The user must be a workspace member.
+        Channel names are lowercased automatically (like Slack).
+        For private channels, you can pass `member_ids` to add initial members.
+        Plan limit `max_channels_per_workspace` is enforced.
+      operationId: createChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+            examples:
+              publicChannel:
+                summary: Public channel
+                value:
+                  name: announcements
+                  description: "Company-wide announcements"
+                  type: public
+              privateChannel:
+                summary: Private channel with initial members
+                value:
+                  name: design-team
+                  description: "Private design discussions"
+                  type: private
+                  member_ids: [5, 7, 8]
+      responses:
+        "201":
+          description: Channel created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Not a workspace member, or plan channel limit reached
+        "409":
+          description: Channel name already exists in this workspace
+
+  /workspace/{workspaceId}/channels/update-channel/{channelId}:
+    patch:
+      tags: [Workspace / Channels]
+      summary: Update a channel
+      description: Only workspace owners and admins can update channels.
+      operationId: updateChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: Channel updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/delete-channel/{channelId}:
+    delete:
+      tags: [Workspace / Channels]
+      summary: Delete a channel
+      description: |
+        Only workspace admins or org admins can delete channels.
+        The **#general** channel cannot be deleted.
+      operationId: deleteChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+      responses:
+        "200":
+          description: Channel deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WORKSPACE — Channel Members
+  # ═══════════════════════════════════════════════════════════════════════════
+  /workspace/{workspaceId}/channels/{channelId}/members/get-all-members:
+    get:
+      tags: [Workspace / Channel Members]
+      summary: Get channel members
+      description: For private channels, only members can list other members.
+      operationId: getChannelMembers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 1
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            example: 3
+        - $ref: "#/components/parameters/QuerySearch"
+        - $ref: "#/components/parameters/QueryPage"
+        - $ref: "#/components/parameters/QueryLimit"
+      responses:
+        "200":
+          description: Channel members retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          data:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/ChannelMember"
+                          total:
+                            type: integer
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+
+  /workspace/{workspaceId}/channels/{channelId}/members/add-member:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Add a member to a channel
+      description: The user must be a workspace member. Cannot add to a channel they're already in.
+      operationId: addChannelMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddChannelMemberRequest"
+            example:
+              user_id: 5
+      responses:
+        "201":
+          description: Member added to channel successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ChannelMember"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "409":
+          description: Already a channel member
+
+  /workspace/{workspaceId}/channels/{channelId}/members/remove-member/{userId}:
+    delete:
+      tags: [Workspace / Channel Members]
+      summary: Remove a member from a channel
+      operationId: removeChannelMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Member removed from channel successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
+  /workspace/{workspaceId}/channels/{channelId}/members/join-channel:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Join a public channel
+      description: |
+        Self-service join for public channels.
+        The user must be a workspace member.
+        Private channels cannot be joined this way — use add-member instead.
+      operationId: joinChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Joined channel successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ChannelMember"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Cannot join private channel or not a workspace member
+        "409":
+          description: Already a channel member
+
+  /workspace/{workspaceId}/channels/{channelId}/members/leave-channel:
+    post:
+      tags: [Workspace / Channel Members]
+      summary: Leave a channel
+      description: |
+        The authenticated user leaves the channel.
+        Cannot leave the **#general** channel.
+      operationId: leaveChannel
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Left channel successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeletedResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Cannot leave #general channel
+        "404":
+          description: Not a channel member
