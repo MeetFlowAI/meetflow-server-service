@@ -137,8 +137,8 @@ export const startMeeting = async ({
 
     // Max participants limit drives LiveKit room cap
     const maxParticipants =
-      limits?.max_meeting_participants > 0
-        ? limits.max_meeting_participants
+      parseInt(limits?.max_meeting_participants, 10) > 0
+        ? parseInt(limits.max_meeting_participants, 10)
         : 100;
 
     // Generate a unique room name for LiveKit
