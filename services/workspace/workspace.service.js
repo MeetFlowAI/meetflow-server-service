@@ -2,29 +2,24 @@ import * as WorkspaceRepository from "../../repositories/workspace/workspace.rep
 import * as WorkspaceMemberRepository from "../../repositories/workspace/workspaceMember.repository.js";
 import * as ChannelRepository from "../../repositories/workspace/channel.repository.js";
 import * as ChannelMemberRepository from "../../repositories/workspace/channelMember.repository.js";
+import * as UserRepository from "../../repositories/organization/user.repository.js";
 import { masterDb } from "../../models/index.js";
 import { USER_ROLES, WORKSPACE_CHANNEL_TYPES } from "../../constants/index.js";
 
 // ─── Plan limit enforcement helper ───────────────────────────────────────────
 
-/**
- * Fetch the org's plan limit for a given key, then compare against current usage.
- * Throws 403 if the limit is reached.
- * limit_value = -1 means unlimited.
- */
 const enforceOrgLimit = async (tenantSchema, limitKey, currentCount) => {
   const org = await masterDb.Organization.findOne({
     where: { schema_name: tenantSchema },
     attributes: ["plan_id"],
   });
-  if (!org?.plan_id) return; // no plan → no enforcement (shouldn't happen in prod)
+  if (!org?.plan_id) return;
 
   const limit = await masterDb.PlanLimit.findOne({
     where: { plan_id: org.plan_id, limit_key: limitKey },
   });
-  if (!limit) return; // limit not configured → allow
-
-  if (limit.limit_value === -1) return; // -1 = unlimited
+  if (!limit) return;
+  if (limit.limit_value === -1) return;
 
   if (currentCount >= limit.limit_value) {
     throw Object.assign(
@@ -39,10 +34,6 @@ const enforceOrgLimit = async (tenantSchema, limitKey, currentCount) => {
 
 // ─── Workspace Selection ──────────────────────────────────────────────────────
 
-/**
- * Returns all workspaces the requesting user belongs to.
- * This is the data source for the workspace selection screen shown after login.
- */
 export const getMyWorkspaces = async ({ tenantSchema, userId }) => {
   try {
     const workspaces = await WorkspaceRepository.getWorkspacesForUser(
@@ -88,7 +79,6 @@ export const getWorkspaceById = async ({
         statusCode: 404,
       });
 
-    // Ensure the requesting user is a member
     const membership = await WorkspaceMemberRepository.getWorkspaceMember(
       tenantSchema,
       workspaceId,
@@ -137,15 +127,69 @@ export const createWorkspace = async ({
       is_active: true,
     });
 
-    // Auto-add the creator as workspace_owner
+    // ── Owner assignment ──────────────────────────────────────────────────────
+    // If owner_id is provided and is a valid org member, assign them as workspace_owner.
+    // Otherwise fall back to the creator.
+    let ownerId = creatorUserId;
+
+    if (data.owner_id && parseInt(data.owner_id) !== parseInt(creatorUserId)) {
+      const ownerUser = await UserRepository.getUserById(
+        tenantSchema,
+        data.owner_id,
+      );
+      if (!ownerUser || ownerUser.is_deleted) {
+        throw Object.assign(
+          new Error("Designated workspace owner is not a valid org member."),
+          { statusCode: 400 },
+        );
+      }
+      ownerId = data.owner_id;
+    }
+
+    // Add owner as workspace_owner
     await WorkspaceMemberRepository.addMemberToWorkspace(
       tenantSchema,
       workspace.id,
-      creatorUserId,
+      ownerId,
       USER_ROLES.WORKSPACE.WORKSPACE_OWNER,
     );
 
-    // Auto-create a default #general public channel
+    // If creator is different from owner, add creator as workspace_admin
+    if (parseInt(ownerId) !== parseInt(creatorUserId)) {
+      await WorkspaceMemberRepository.addMemberToWorkspace(
+        tenantSchema,
+        workspace.id,
+        creatorUserId,
+        USER_ROLES.WORKSPACE.WORKSPACE_ADMIN,
+      );
+    }
+
+    // ── Bulk add initial members ──────────────────────────────────────────────
+    if (Array.isArray(data.member_ids) && data.member_ids.length > 0) {
+      const alreadyAdded = new Set([String(ownerId), String(creatorUserId)]);
+
+      for (const memberId of data.member_ids) {
+        if (alreadyAdded.has(String(memberId))) continue;
+
+        // Validate each member is a real org user (skip silently if not)
+        const orgUser = await UserRepository.getUserById(
+          tenantSchema,
+          memberId,
+        );
+        if (!orgUser || orgUser.is_deleted) continue;
+
+        await WorkspaceMemberRepository.addMemberToWorkspace(
+          tenantSchema,
+          workspace.id,
+          memberId,
+          USER_ROLES.WORKSPACE.WORKSPACE_MEMBER,
+        );
+
+        alreadyAdded.add(String(memberId));
+      }
+    }
+
+    // ── Auto-create #general channel ─────────────────────────────────────────
     const generalChannel = await ChannelRepository.createChannel(tenantSchema, {
       name: "general",
       description: "General discussion for everyone in this workspace.",
@@ -153,12 +197,20 @@ export const createWorkspace = async ({
       type: WORKSPACE_CHANNEL_TYPES.PUBLIC,
     });
 
-    // Add the creator to the general channel
-    await ChannelMemberRepository.addMemberToChannel(
+    // Add all workspace members to #general
+    const allMembers = await WorkspaceMemberRepository.getWorkspaceMembers(
       tenantSchema,
-      generalChannel.id,
-      creatorUserId,
+      workspace.id,
+      { skip: 0, limit: 1000 },
     );
+
+    for (const wm of allMembers.data) {
+      await ChannelMemberRepository.addMemberToChannel(
+        tenantSchema,
+        generalChannel.id,
+        wm.user_id,
+      );
+    }
 
     return workspace;
   } catch (err) {
@@ -182,7 +234,6 @@ export const updateWorkspace = async ({
         statusCode: 404,
       });
 
-    // Only workspace owner or org admin roles can update
     const membership = await WorkspaceMemberRepository.getWorkspaceMember(
       tenantSchema,
       workspaceId,
@@ -243,7 +294,6 @@ export const deleteWorkspace = async ({
         statusCode: 404,
       });
 
-    // Only org super admin or the workspace owner can delete
     const membership = await WorkspaceMemberRepository.getWorkspaceMember(
       tenantSchema,
       workspaceId,
