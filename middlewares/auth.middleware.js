@@ -21,7 +21,7 @@ export const authenticate = (req, res, next) => {
       return errorResponse(
         res,
         STATUS_CODES.UNAUTHORIZED,
-        RESPONSE_MESSAGES.ERROR,
+        RESPONSE_MESSAGES.UNAUTHORIZED,
         "Access token is required.",
         null,
       );
@@ -47,7 +47,7 @@ export const authenticate = (req, res, next) => {
     return errorResponse(
       res,
       STATUS_CODES.UNAUTHORIZED,
-      RESPONSE_MESSAGES.ERROR,
+      RESPONSE_MESSAGES.UNAUTHORIZED,
       message,
       null,
     );
@@ -56,7 +56,7 @@ export const authenticate = (req, res, next) => {
 
 /**
  * Role guard — use after authenticate().
- * Usage: authorize("super_admin", "admin")
+ * Usage: authorize(["role_a", "role_b"])
  */
 export const authorize = (allowedRoles) => {
   return (req, res, next) => {
@@ -64,22 +64,17 @@ export const authorize = (allowedRoles) => {
       return errorResponse(
         res,
         STATUS_CODES.UNAUTHORIZED,
-        RESPONSE_MESSAGES.ERROR,
+        RESPONSE_MESSAGES.UNAUTHORIZED,
         "Not authenticated.",
         null,
       );
-    }
-    console.log("allowed roles", allowedRoles);
-    console.log("user.role", req.user.role);
-    if (allowedRoles.includes(req.user.role)) {
-      console.log("heyy");
     }
 
     if (!allowedRoles.includes(req.user.role)) {
       return errorResponse(
         res,
         STATUS_CODES.FORBIDDEN,
-        RESPONSE_MESSAGES.ERROR,
+        RESPONSE_MESSAGES.FORBIDDEN,
         "You do not have permission to perform this action.",
         null,
       );
@@ -98,7 +93,7 @@ export const requireOrgContext = (req, res, next) => {
     return errorResponse(
       res,
       STATUS_CODES.FORBIDDEN,
-      RESPONSE_MESSAGES.ERROR,
+      RESPONSE_MESSAGES.FORBIDDEN,
       "This route is only accessible to organisation users.",
       null,
     );
@@ -115,7 +110,7 @@ export const requireMasterContext = (req, res, next) => {
     return errorResponse(
       res,
       STATUS_CODES.FORBIDDEN,
-      RESPONSE_MESSAGES.ERROR,
+      RESPONSE_MESSAGES.FORBIDDEN,
       "This route is only accessible to master users.",
       null,
     );

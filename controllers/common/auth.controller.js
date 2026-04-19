@@ -22,7 +22,6 @@ export const login = async (req, res) => {
       result,
     );
   } catch (err) {
-    console.log("err:", err);
     const statusCode = err.statusCode || STATUS_CODES.BAD_REQUEST;
     return errorResponse(
       res,

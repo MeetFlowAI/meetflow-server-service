@@ -55,7 +55,6 @@ export const getAllOrganizations = async (filters) => {
   try {
     return await OrganizationRepository.getAllOrganizations(filters);
   } catch (err) {
-    console.log("error:", error);
     throw {
       statusCode: 500,
       message: "Failed to fetch organizations",
@@ -94,8 +93,6 @@ export const getOrganizationById = async (id) => {
  */
 export const createOrganization = async (data) => {
   try {
-    console.log("in service");
-
     // ── 1. Validate required fields ────────────────────────────────────────────
     if (!data.name) throw new Error("Organization name is required");
     if (!data.display_name) throw new Error("Display name is required");
@@ -189,10 +186,6 @@ export const createOrganization = async (data) => {
       is_active: true,
     });
 
-    console.log(
-      `✅ Org super admin created in ${schema_name}.users — ${data.primary_owner_email}`,
-    );
-
     // ── 6. Send emails (fire-and-forget — don't fail the request if email fails) ─
     sendOrgCreatedOfficialEmail({
       toEmail: data.official_email,
@@ -217,7 +210,6 @@ export const createOrganization = async (data) => {
     // Never return the temp password in the API response
     return org;
   } catch (err) {
-    console.log("err:", err);
     throw { statusCode: err.statusCode || 400, message: err.message };
   }
 };

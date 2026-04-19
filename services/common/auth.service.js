@@ -113,8 +113,6 @@ export const login = async ({
     rememberMe,
   );
 
-  console.log("user is here:", user);
-
   // Persist refresh token
   await AuthRepository.storeRefreshToken({
     user_id: user.id,
