@@ -22,11 +22,16 @@ export const MasterRoleModel = (sequelize, DataTypes) => {
         type: DataTypes.TEXT,
       },
       is_system: { type: DataTypes.BOOLEAN, defaultValue: true },
+      is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
     },
     {
       tableName: "roles",
       schema: "master_tenant",
       timestamps: true,
+      paranoid: true,
       underscored: true,
     },
   );

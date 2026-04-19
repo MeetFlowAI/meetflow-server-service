@@ -241,21 +241,21 @@ const provisionTenantSchema = async (schemaName) => {
   // 3. Sync ONLY the models that belong to this tenant schema
   const syncOptions = { schema: schemaName };
 
-  await tenantDb.Role.sync({ alter: true, ...syncOptions });
-  await tenantDb.User.sync({ alter: true, ...syncOptions });
-  await tenantDb.Invitation.sync({ alter: true, ...syncOptions });
+  await tenantDb.Role.sync(syncOptions);
+  await tenantDb.User.sync(syncOptions);
+  await tenantDb.Invitation.sync(syncOptions);
 
   // Workspace must sync BEFORE PlanLimitUsage (which has FK to Workspace)
-  await tenantDb.Workspace.sync({ alter: true, ...syncOptions });
-  await tenantDb.PlanLimitUsage.sync({ alter: true, ...syncOptions });
+  await tenantDb.Workspace.sync(syncOptions);
+  await tenantDb.PlanLimitUsage.sync(syncOptions);
 
-  await tenantDb.WorkspaceMember.sync({ alter: true, ...syncOptions });
-  await tenantDb.Channel.sync({ alter: true, ...syncOptions });
-  await tenantDb.ChannelMember.sync({ alter: true, ...syncOptions });
+  await tenantDb.WorkspaceMember.sync(syncOptions);
+  await tenantDb.Channel.sync(syncOptions);
+  await tenantDb.ChannelMember.sync(syncOptions);
 
   // Meeting must sync AFTER Channel and Workspace (foreign keys)
-  await tenantDb.Meeting.sync({ alter: true, ...syncOptions });
-  await tenantDb.MeetingParticipant.sync({ alter: true, ...syncOptions });
+  await tenantDb.Meeting.sync(syncOptions);
+  await tenantDb.MeetingParticipant.sync(syncOptions);
 
   console.log(`✅ Tables synced for tenant: ${schemaName}`);
 
@@ -275,14 +275,14 @@ const initializeDatabase = async () => {
     await sequelize.query(`CREATE SCHEMA IF NOT EXISTS master_tenant;`);
     console.log("✅ master_tenant schema ready");
 
-    await masterDb.MasterRole.sync({ alter: true });
-    await masterDb.MasterUser.sync({ alter: true });
-    await masterDb.Plan.sync({ alter: true });
-    await masterDb.Feature.sync({ alter: true });
-    await masterDb.PlanFeature.sync({ alter: true });
-    await masterDb.PlanLimit.sync({ alter: true });
-    await masterDb.Organization.sync({ alter: true });
-    await masterDb.RefreshToken.sync({ alter: true });
+    await masterDb.MasterRole.sync();
+    await masterDb.MasterUser.sync();
+    await masterDb.Plan.sync();
+    await masterDb.Feature.sync();
+    await masterDb.PlanFeature.sync();
+    await masterDb.PlanLimit.sync();
+    await masterDb.Organization.sync();
+    await masterDb.RefreshToken.sync();
 
     console.log("✅ Master models synchronised");
 
