@@ -36,7 +36,6 @@ export const createRole = async (data) => {
 
     return await RoleRepository.createRole(data);
   } catch (err) {
-    console.log("err in service:", err);
     throw {
       statusCode: 400,
       message: err.message,
@@ -81,7 +80,11 @@ export const deleteRole = async (id) => {
 const buildBulkResult = (succeeded, failed) => ({
   succeeded,
   failed,
-  summary: { total: succeeded.length + failed.length, success: succeeded.length, failed: failed.length },
+  summary: {
+    total: succeeded.length + failed.length,
+    success: succeeded.length,
+    failed: failed.length,
+  },
 });
 
 // ─── Bulk Services ────────────────────────────────────────────────────────────

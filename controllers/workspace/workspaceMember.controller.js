@@ -4,7 +4,6 @@ import { STATUS_CODES, RESPONSE_MESSAGES } from "../../constants/response.js";
 
 export const getWorkspaceMembers = async (req, res) => {
   try {
-    console.log("workspaceId:", req.params.workspaceId);
     const data = await WorkspaceMemberService.getWorkspaceMembers({
       tenantSchema: req.user.tenantSchema,
       workspaceId: req.params.workspaceId,
@@ -14,7 +13,7 @@ export const getWorkspaceMembers = async (req, res) => {
       res,
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
-      "Members retrieved successfully",
+      RESPONSE_MESSAGES.SUCCESS_MESSAGES.WORKSPACE.MEMBER.GET_ALL,
       data,
     );
   } catch (err) {
@@ -40,7 +39,7 @@ export const addMember = async (req, res) => {
       res,
       STATUS_CODES.CREATED,
       RESPONSE_MESSAGES.SUCCESS,
-      "Member added to workspace successfully",
+      RESPONSE_MESSAGES.SUCCESS_MESSAGES.WORKSPACE.MEMBER.ADD,
       data,
     );
   } catch (err) {
@@ -62,12 +61,13 @@ export const updateMemberRole = async (req, res) => {
       userId: req.params.userId,
       role: req.body.role,
       requestingUserId: req.user.userId,
+      requestingUserRole: req.user.role,
     });
     return successResponse(
       res,
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
-      "Member role updated successfully",
+      RESPONSE_MESSAGES.SUCCESS_MESSAGES.WORKSPACE.MEMBER.ROLE_UPDATE,
       data,
     );
   } catch (err) {
@@ -94,7 +94,7 @@ export const removeMember = async (req, res) => {
       res,
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
-      "Member removed from workspace successfully",
+      RESPONSE_MESSAGES.SUCCESS_MESSAGES.WORKSPACE.MEMBER.REMOVE,
       data,
     );
   } catch (err) {

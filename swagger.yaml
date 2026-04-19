@@ -46,7 +46,7 @@ info:
 servers:
   - url: http://localhost:8000/api/v1
     description: Local Development
-  - url: https://api.meetflow.com/api/v1
+  - url: https://api.meetflow.builtbyag09.tech/api/v1
     description: Production
 
 tags:
@@ -2029,6 +2029,113 @@ components:
           format: int64
           example: 5
           description: Must be a member of the parent workspace
+
+    Meeting:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        channel_id:
+          type: integer
+          format: int64
+          example: 3
+        workspace_id:
+          type: integer
+          format: int64
+          example: 2
+        started_by_id:
+          type: integer
+          format: int64
+          example: 7
+        title:
+          type: string
+          nullable: true
+          example: "Weekly Standup"
+        livekit_room_name:
+          type: string
+          example: "meeting_abc123"
+        status:
+          type: string
+          enum: [active, ended, cancelled]
+          example: active
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration_seconds:
+          type: integer
+          nullable: true
+          example: 3600
+        host:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    MeetingParticipant:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        meeting_id:
+          type: integer
+          format: int64
+        user_id:
+          type: integer
+          format: int64
+        livekit_identity:
+          type: string
+        joined_at:
+          type: string
+          format: date-time
+        left_at:
+          type: string
+          format: date-time
+          nullable: true
+        participant:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            first_name:
+              type: string
+            last_name:
+              type: string
+            email:
+              type: string
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total_pages:
+          type: integer
+          example: 3
 
 paths:
   # ═══════════════════════════════════════════════════════════════════════════
@@ -4864,6 +4971,56 @@ paths:
         "404":
           $ref: "#/components/responses/NotFoundError"
 
+  /organization/users/update-role/{id}:
+    patch:
+      tags: [Organization / Users]
+      summary: Update a user's role
+      description: |
+        Updates the org role of a user. Requires org admin or super admin.
+
+        **Restrictions:**
+        - Cannot change your own role
+        - Cannot demote the org super admin
+        - `role_id` must be a valid role in this organisation
+      operationId: updateOrgUserRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role_id
+              properties:
+                role_id:
+                  type: integer
+                  format: int64
+                  example: 2
+      responses:
+        "200":
+          description: User role updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrgUser"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+
   # ═══════════════════════════════════════════════════════════════════════════
   # ORGANIZATION — Invitations
   # ═══════════════════════════════════════════════════════════════════════════
@@ -5897,3 +6054,647 @@ paths:
           description: Cannot leave #general channel
         "404":
           description: Not a channel member
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # WORKSPACE / MEETINGS
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  /workspace/{workspaceId}/channels/{channelId}/meetings/start:
+    post:
+      tags: [Workspace / Meetings]
+      summary: Start a new meeting
+      description: |
+        Creates a LiveKit room and saves a meeting record in the database.
+
+        **Plan limits enforced:**
+        - `max_concurrent_meetings` — number of meetings running simultaneously
+        - `max_meeting_participants` — participants per meeting
+
+        Returns a LiveKit join token so the caller can connect immediately.
+      operationId: startMeeting
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  maxLength: 255
+                  example: "Weekly Standup"
+      responses:
+        "201":
+          description: Meeting started successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          meeting:
+                            $ref: "#/components/schemas/Meeting"
+                          token:
+                            type: string
+                            description: LiveKit join token
+                          livekit_url:
+                            type: string
+                            example: "wss://meetflow-adt2mh60.livekit.cloud"
+                          livekit_room_name:
+                            type: string
+                            example: "meeting_abc123"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Plan limit reached — too many concurrent meetings
+        "404":
+          description: Channel or workspace not found
+
+  /workspace/{workspaceId}/channels/{channelId}/meetings/{meetingId}/join:
+    post:
+      tags: [Workspace / Meetings]
+      summary: Join an existing meeting
+      description: |
+        Joins an active meeting and returns a LiveKit token for the participant.
+
+        **Plan limit enforced:** `max_meeting_participants`
+
+        The meeting must be in `active` status. If already ended, returns 400.
+      operationId: joinMeeting
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: meetingId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Joined meeting successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          meeting:
+                            $ref: "#/components/schemas/Meeting"
+                          token:
+                            type: string
+                            description: LiveKit join token
+                          livekit_url:
+                            type: string
+                          livekit_room_name:
+                            type: string
+        "400":
+          description: Meeting has already ended
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Participant limit reached or not a workspace member
+        "404":
+          description: Meeting not found
+
+  /workspace/{workspaceId}/channels/{channelId}/meetings/{meetingId}/end:
+    post:
+      tags: [Workspace / Meetings]
+      summary: End a meeting for everyone
+      description: |
+        Terminates the LiveKit room and marks the meeting as `ended` in the database.
+
+        **Permissions:** Meeting host, workspace admin/owner, or org admin can end a meeting.
+      operationId: endMeeting
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: meetingId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Meeting ended successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "400":
+          description: Meeting already ended
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Not authorized to end this meeting
+        "404":
+          description: Meeting not found
+
+  /workspace/{workspaceId}/channels/{channelId}/meetings:
+    get:
+      tags: [Workspace / Meetings]
+      summary: List meetings for a channel
+      description: |
+        Returns a paginated list of meetings in a channel, most recent first.
+
+        Includes `active`, `ended`, and `cancelled` meetings.
+      operationId: getMeetings
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, ended, cancelled]
+      responses:
+        "200":
+          description: Meetings retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Meeting"
+                      pagination:
+                        $ref: "#/components/schemas/Pagination"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          description: Not a workspace member
+        "404":
+          description: Channel or workspace not found
+
+  /workspace/{workspaceId}/channels/{channelId}/meetings/{meetingId}:
+    get:
+      tags: [Workspace / Meetings]
+      summary: Get meeting detail
+      description: |
+        Returns full meeting details including the participant list.
+      operationId: getMeetingDetail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: meetingId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Meeting detail retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          meeting:
+                            $ref: "#/components/schemas/Meeting"
+                          participants:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/MeetingParticipant"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          description: Meeting not found
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CHAT / STREAM
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  /chat/token:
+    get:
+      tags: [Chat / Stream]
+      summary: Get Stream Chat user token
+      description: |
+        Returns a Stream Chat connection token for the authenticated user.
+
+        The frontend should call this once after login and pass the token to
+        the Stream Chat client SDK to establish a connection.
+      operationId: getChatToken
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Stream Chat token generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                            description: Stream Chat user token
+                          user_id:
+                            type: string
+                            description: Stream user ID (matches org user ID)
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/channels:
+    post:
+      tags: [Chat / Stream]
+      summary: Provision a Stream channel
+      description: |
+        Creates or retrieves a Stream Chat channel that mirrors a workspace channel.
+
+        Call this when a workspace channel is created so Stream is kept in sync.
+      operationId: provisionChannel
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_id, channel_id]
+              properties:
+                workspace_id:
+                  type: integer
+                channel_id:
+                  type: integer
+                name:
+                  type: string
+                  example: "general"
+      responses:
+        "200":
+          description: Stream channel provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/channels/{streamChannelId}/members:
+    post:
+      tags: [Chat / Stream]
+      summary: Add member to a Stream channel
+      description: |
+        Adds a user to the specified Stream Chat channel.
+
+        Should be called whenever a user is added to a workspace channel.
+      operationId: addChatMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: streamChannelId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "workspace_3_channel_7"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: integer
+      responses:
+        "200":
+          description: Member added to Stream channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/channels/{streamChannelId}/members/{userId}:
+    delete:
+      tags: [Chat / Stream]
+      summary: Remove member from a Stream channel
+      description: |
+        Removes a user from the specified Stream Chat channel.
+
+        Should be called whenever a user is removed from a workspace channel.
+      operationId: removeChatMember
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: streamChannelId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Member removed from Stream channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessEnvelope"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/dm:
+    post:
+      tags: [Chat / Stream]
+      summary: Get or create a Direct Message channel
+      description: |
+        Gets an existing DM channel between the authenticated user and a target user,
+        or creates one if it doesn't exist yet. Idempotent.
+      operationId: createDM
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_user_id]
+              properties:
+                target_user_id:
+                  type: integer
+                  description: The user ID to open a DM with
+      responses:
+        "200":
+          description: DM channel ready
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          channel_id:
+                            type: string
+                            description: Stream channel ID for this DM
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/meeting-channel:
+    post:
+      tags: [Chat / Stream]
+      summary: Create an in-meeting chat channel
+      description: |
+        Creates a dedicated Stream Chat channel for an active meeting.
+
+        Call this when a meeting starts. The channel is tied to the meeting ID
+        so all participants can chat during the meeting session.
+      operationId: createMeetingChannel
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meeting_id]
+              properties:
+                meeting_id:
+                  type: integer
+                meeting_title:
+                  type: string
+      responses:
+        "200":
+          description: Meeting chat channel created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          channel_id:
+                            type: string
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /chat/sync-workspace:
+    post:
+      tags: [Chat / Stream]
+      summary: Sync workspace channels to Stream
+      description: |
+        Idempotent endpoint that provisions Stream channels for all workspace channels
+        that don't yet have one. Safe to call anytime — creates missing channels,
+        skips existing ones.
+
+        Useful for initial setup or recovery after a Stream outage.
+      operationId: syncWorkspace
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_id]
+              properties:
+                workspace_id:
+                  type: integer
+      responses:
+        "200":
+          description: Workspace sync complete
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          synced:
+                            type: integer
+                            description: Number of channels provisioned
+                          skipped:
+                            type: integer
+                            description: Number already in sync
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # WEBHOOKS / LIVEKIT
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  /webhook/livekit:
+    post:
+      tags: [Webhooks / LiveKit]
+      summary: LiveKit webhook receiver
+      description: |
+        Receives real-time room and participant events from LiveKit Cloud.
+
+        **Security:** Every request from LiveKit is signed with HMAC-SHA256 using your
+        `LIVEKIT_API_SECRET`. The signature is verified before any processing occurs.
+        Invalid signatures are silently acknowledged (200) to stop LiveKit retries.
+
+        **Setup:** Register this URL in your LiveKit dashboard:
+        `Settings → Webhooks → Add Webhook URL`
+
+        **Handled events:**
+        | Event | Action |
+        |-------|--------|
+        | `room_finished` | Marks meeting as `ended`, records duration |
+        | `participant_joined` | Creates/updates MeetingParticipant record |
+        | `participant_left` | Records leave time for participant |
+
+        **Always returns 200** — LiveKit stops retrying on any non-2xx response,
+        so we absorb errors internally and always acknowledge.
+      operationId: livekitWebhook
+      security: []
+      requestBody:
+        description: LiveKit webhook event payload (raw body required for HMAC verification)
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  enum:
+                    - room_started
+                    - room_finished
+                    - participant_joined
+                    - participant_left
+                    - track_published
+                    - track_unpublished
+                  example: room_finished
+                room:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    sid:
+                      type: string
+                participant:
+                  type: object
+                  nullable: true
+                  properties:
+                    identity:
+                      type: string
+                    name:
+                      type: string
+      responses:
+        "200":
+          description: Event acknowledged (always returned — even on signature failure or internal error)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  reason:
+                    type: string
+                    nullable: true
+                    enum: [null, signature_invalid, internal_error]

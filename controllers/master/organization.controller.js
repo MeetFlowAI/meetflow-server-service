@@ -51,7 +51,6 @@ export const getOrganizationById = async (req, res) => {
 
 export const createOrganization = async (req, res) => {
   try {
-    console.log("in controller");
     const result = await OrganizationService.createOrganization(req.body);
     return successResponse(
       res,
