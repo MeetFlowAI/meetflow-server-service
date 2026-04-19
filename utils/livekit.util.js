@@ -45,8 +45,8 @@ export const createLiveKitRoom = async (
   const svc = getRoomService();
   const room = await svc.createRoom({
     name: roomName,
-    maxParticipants,
-    emptyTimeout,
+    maxParticipants: parseInt(maxParticipants, 10),
+    emptyTimeout: parseInt(emptyTimeout, 10),
     metadata: JSON.stringify({ createdAt: new Date().toISOString() }),
   });
   return room;
