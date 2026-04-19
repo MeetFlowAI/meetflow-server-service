@@ -61,7 +61,6 @@ export const createRole = async (req, res) => {
     );
   } catch (err) {
     const statusCode = err.statusCode || STATUS_CODES.BAD_REQUEST;
-    console.log("err in controller:", err);
     return errorResponse(
       res,
       statusCode,
