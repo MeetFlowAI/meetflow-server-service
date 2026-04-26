@@ -56,6 +56,39 @@ export const MeetingModel = (sequelize, DataTypes, options = {}) => {
         defaultValue: 0,
         allowNull: false,
       },
+      // UUID returned by AI service when pipeline is triggered
+      ai_meeting_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+      },
+      // Track AI processing state independently from meeting status
+      ai_status: {
+        type: DataTypes.ENUM(
+          "not_triggered",
+          "processing",
+          "pending_review",
+          "completed",
+          "failed",
+        ),
+        defaultValue: "not_triggered",
+        allowNull: false,
+      },
+      // Type of meeting — sent to AI for context-aware processing
+      meeting_type: {
+        type: DataTypes.STRING(50),
+        defaultValue: "general",
+        allowNull: false,
+      },
+      // URL of the meeting recording (from LiveKit Egress) — needed by AI pipeline
+      recording_url: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      // LiveKit Egress job ID — stored so we can stop it when meeting ends
+      livekit_egress_id: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       tableName: "meetings",

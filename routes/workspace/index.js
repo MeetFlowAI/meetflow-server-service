@@ -4,6 +4,8 @@ import WorkspaceMemberRoutes from "./workspaceMember.route.js";
 import ChannelRoutes from "./channel.route.js";
 import ChannelMemberRoutes from "./channelMember.route.js";
 import MeetingRoutes from "./meeting.route.js";
+import AIRoutes from "./ai.route.js";
+import EnrollmentRoutes from "./enrollment.route.js";
 
 const WorkspaceRoutes = Router();
 
@@ -18,5 +20,7 @@ WorkspaceRoutes.use(
   "/:workspaceId/channels/:channelId/meetings",
   MeetingRoutes,
 );
+WorkspaceRoutes.use("/:workspaceId/enroll-voice", EnrollmentRoutes);
+WorkspaceRoutes.use("/:workspaceId/channels/:channelId/meetings", AIRoutes);
 
 export default WorkspaceRoutes;

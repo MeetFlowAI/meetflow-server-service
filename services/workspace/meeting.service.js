@@ -22,8 +22,12 @@ import {
   deleteLiveKitRoom,
   getLiveKitParticipants,
   generateJoinToken,
+  startRoomRecording,
+  stopRoomRecording,
 } from "../../utils/livekit.util.js";
 import { USER_ROLES } from "../../constants/index.js";
+import { triggerAIPipeline } from "../ai/ai.service.js";
+import { envConfig } from "../../config/env.config.js";
 
 // ─── Plan limit helpers ───────────────────────────────────────────────────────
 
@@ -148,6 +152,10 @@ export const startMeeting = async ({
     // Create room on LiveKit cloud (non-blocking for user — very fast ~100ms)
     await createLiveKitRoom(livekitRoomName, maxParticipants, 300);
 
+    // Start recording immediately after room creation
+    // Egress uploads audio to Supabase Storage when stopped
+    const egressId = await startRoomRecording(livekitRoomName);
+
     // Save meeting record
     const meeting = await MeetingRepository.createMeeting(tenantSchema, {
       channel_id: channelId,
@@ -158,6 +166,7 @@ export const startMeeting = async ({
       started_at: new Date(),
       livekit_room_name: livekitRoomName,
       participant_count: 1,
+      livekit_egress_id: egressId || null,
     });
 
     // Record host as first participant
@@ -353,10 +362,14 @@ export const endMeeting = async ({
     // Delete the LiveKit room — kicks all participants immediately
     await deleteLiveKitRoom(meeting.livekit_room_name);
 
-    const endedAt = new Date();
-    const durationSeconds = Math.floor(
-      (endedAt - new Date(meeting.started_at)) / 1000,
+    // Stop egress recording — LiveKit finalises MP3 and uploads to Supabase
+    // This returns the public URL of the recording file
+    const recordingUrl = await stopRoomRecording(
+      meeting.livekit_egress_id,
+      meeting.livekit_room_name,
     );
+
+    const endedAt = new Date();
 
     const updated = await MeetingRepository.updateMeeting(
       tenantSchema,
@@ -364,9 +377,83 @@ export const endMeeting = async ({
       {
         status: "ended",
         ended_at: endedAt,
-        // Store final live participant count from LiveKit before room disappears
+        recording_url: recordingUrl || null,
       },
     );
+
+    // ── Trigger AI pipeline (non-blocking) ─────────────────────────────────
+    // Run after response — does not delay the user's "End Meeting" action.
+    // Requires: workspace.ai_channel_id + meeting.recording_url
+    setImmediate(async () => {
+      try {
+        const workspace = await WorkspaceRepository.getWorkspaceById(
+          tenantSchema,
+          workspaceId,
+        );
+        if (!workspace?.ai_channel_id) {
+          console.log(
+            `ℹ️ AI: workspace ${workspaceId} has no ai_channel_id — pipeline skipped`,
+          );
+          return;
+        }
+
+        // recording_url is set by LiveKit Egress when recording is ready.
+        // Until Egress is configured, set it manually on the meeting record for testing.
+        const recordingUrl = updated.recording_url;
+        if (!recordingUrl) {
+          console.log(
+            `ℹ️ AI: meeting ${meetingId} has no recording_url — pipeline skipped`,
+          );
+          return;
+        }
+
+        // Collect AI participant IDs from workspace members who joined this meeting
+        const participants = await MeetingRepository.getParticipantsByMeeting(
+          tenantSchema,
+          meetingId,
+        );
+        const aiParticipantIds = [];
+        for (const p of participants) {
+          const wm = await WorkspaceMemberRepository.getWorkspaceMember(
+            tenantSchema,
+            workspaceId,
+            p.user_id,
+          );
+          if (wm?.ai_participant_id) {
+            aiParticipantIds.push(wm.ai_participant_id);
+          }
+        }
+
+        // external_id lets the webhook handler route back to the right tenant + meeting
+        const externalId = `${tenantSchema}__${meetingId}`;
+
+        const aiResult = await triggerAIPipeline({
+          audioUrl: recordingUrl,
+          aiChannelId: workspace.ai_channel_id,
+          externalId,
+          meetingType: updated.meeting_type || "general",
+          participantIds: aiParticipantIds,
+          webhookUrl: envConfig.BACKEND_WEBHOOK_URL,
+        });
+
+        await MeetingRepository.updateMeeting(tenantSchema, meetingId, {
+          ai_meeting_id: aiResult.meeting_id,
+          ai_status: "processing",
+        });
+
+        console.log(
+          `🤖 AI pipeline triggered for meeting ${meetingId} → AI ID: ${aiResult.meeting_id}`,
+        );
+      } catch (aiErr) {
+        console.error(
+          `❌ AI pipeline failed for meeting ${meetingId}: ${aiErr.message}`,
+        );
+        // Mark as failed so frontend can show appropriate state
+        await MeetingRepository.updateMeeting(tenantSchema, meetingId, {
+          ai_status: "failed",
+        }).catch(() => {});
+      }
+    });
 
     return formatMeeting(updated);
   } catch (err) {
@@ -543,5 +630,10 @@ const formatMeeting = (m) => ({
   ended_at: m.ended_at,
   participant_count: m.participant_count,
   livekit_room_name: m.livekit_room_name,
+  livekit_egress_id: m.livekit_egress_id || null,
+  meeting_type: m.meeting_type || "general",
+  ai_status: m.ai_status || "not_triggered",
+  ai_meeting_id: m.ai_meeting_id || null,
+  recording_url: m.recording_url || null,
   created_at: m.createdAt,
 });

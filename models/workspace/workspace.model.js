@@ -27,6 +27,12 @@ export const WorkspaceModel = (sequelize, DataTypes, options = {}) => {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
       },
+      // UUID of the corresponding context in the AI service
+      // Null until the workspace is provisioned with AI service
+      ai_channel_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+      },
     },
     {
       tableName: "workspaces",

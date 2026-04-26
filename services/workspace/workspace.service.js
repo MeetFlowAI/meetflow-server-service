@@ -5,6 +5,8 @@ import * as ChannelMemberRepository from "../../repositories/workspace/channelMe
 import * as UserRepository from "../../repositories/organization/user.repository.js";
 import { masterDb } from "../../models/index.js";
 import { USER_ROLES, WORKSPACE_CHANNEL_TYPES } from "../../constants/index.js";
+import { provisionAIWorkspace } from "../ai/ai.service.js";
+import { envConfig } from "../../config/env.config.js";
 
 // ─── Plan limit enforcement helper ───────────────────────────────────────────
 
@@ -209,6 +211,29 @@ export const createWorkspace = async ({
         tenantSchema,
         generalChannel.id,
         wm.user_id,
+      );
+    }
+
+    return workspace;
+
+    // ── Provision AI workspace context (non-blocking) ──────────────────────────
+    try {
+      const webhookUrl = envConfig.BACKEND_WEBHOOK_URL;
+      const aiResult = await provisionAIWorkspace({
+        workspaceName: workspace.name,
+        webhookUrl,
+      });
+      // Save AI channel UUID back to workspace record
+      await WorkspaceRepository.updateWorkspace(tenantSchema, workspace.id, {
+        ai_channel_id: aiResult.channel_id,
+      });
+      console.log(
+        `🤖 AI workspace provisioned for "${workspace.name}" → ${aiResult.channel_id}`,
+      );
+    } catch (aiErr) {
+      // Non-fatal: workspace still works without AI
+      console.warn(
+        `⚠️ AI workspace provisioning failed (workspace still created): ${aiErr.message}`,
       );
     }
 
