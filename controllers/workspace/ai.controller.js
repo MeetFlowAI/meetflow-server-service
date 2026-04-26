@@ -43,9 +43,9 @@ const getMeetingWithAI = async (tenantSchema, meetingId) => {
     throw Object.assign(
       new Error(
         "AI processing has not been triggered for this meeting. " +
-          "The meeting may not have a recording yet.",
+          "The meeting may not have a recording yet."
       ),
-      { statusCode: 404 },
+      { statusCode: 404 }
     );
   }
   return meeting;
@@ -70,14 +70,14 @@ export const getAIStatus = async (req, res) => {
         ai_status: meeting.ai_status,
         ai_meeting_id: meeting.ai_meeting_id,
         pipeline,
-      },
+      }
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
@@ -96,7 +96,7 @@ export const getAITasks = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Tasks are not ready yet. Current AI status: '${meeting.ai_status}'.`,
+        `Tasks are not ready yet. Current AI status: '${meeting.ai_status}'.`
       );
     }
 
@@ -106,14 +106,14 @@ export const getAITasks = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Tasks retrieved successfully",
-      tasks,
+      tasks
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
@@ -132,7 +132,7 @@ export const submitAIMeetingReview = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Cannot submit review. AI status is '${meeting.ai_status}', expected 'pending_review'.`,
+        `Cannot submit review. AI status is '${meeting.ai_status}', expected 'pending_review'.`
       );
     }
 
@@ -146,14 +146,14 @@ export const submitAIMeetingReview = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Review submitted successfully. Summary generation has started.",
-      result,
+      result
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
@@ -173,14 +173,14 @@ export const getAITranscript = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Transcript retrieved successfully",
-      transcript,
+      transcript
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
@@ -199,7 +199,7 @@ export const getAISummary = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Summary is not available yet. Current AI status: '${meeting.ai_status}'.`,
+        `Summary is not available yet. Current AI status: '${meeting.ai_status}'.`
       );
     }
 
@@ -209,14 +209,14 @@ export const getAISummary = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Summary retrieved successfully",
-      summary,
+      summary
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
@@ -233,14 +233,14 @@ export const enrollVoice = async (req, res) => {
     // Get workspace — need ai_channel_id
     const workspace = await WorkspaceRepository.getWorkspaceById(
       tenantSchema,
-      workspaceId,
+      workspaceId
     );
     if (!workspace) {
       return errorResponse(
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "Workspace not found.",
+        "Workspace not found."
       );
     }
     if (!workspace.ai_channel_id) {
@@ -248,7 +248,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "AI context has not been provisioned for this workspace yet. Please try again in a few moments.",
+        "AI context has not been provisioned for this workspace yet. Please try again in a few moments."
       );
     }
 
@@ -262,7 +262,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "User not found.",
+        "User not found."
       );
     }
 
@@ -277,7 +277,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.BAD_REQUEST,
         RESPONSE_MESSAGES.BAD_REQUEST,
-        "At least 1 audio clip is required. Please provide 3–5 clips for best accuracy.",
+        "At least 1 audio clip is required. Please provide 3–5 clips for best accuracy."
       );
     }
 
@@ -293,7 +293,7 @@ export const enrollVoice = async (req, res) => {
     formData.append("role", wm?.role || "member");
     formData.append("external_id", String(userId));
 
-    // Each clip is appended as a separate "audio_clips" part with its own filename
+    // Append each clip as a separate audio_clips part
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       formData.append("audio_clips", file.buffer, {
@@ -303,39 +303,39 @@ export const enrollVoice = async (req, res) => {
       });
     }
 
-    // Forward directly — must use formData.getHeaders() so the boundary is set correctly
+    // Use axios — it correctly pipes form-data streams to FastAPI.
+    // fetch + form-data causes "error parsing body" in FastAPI due to
+    // how Node's fetch handles the multipart stream internally.
+    const axios = (await import("axios")).default;
     const AI_BASE = envConfig.AI_SERVICE_URL;
     const AI_KEY = envConfig.AI_SERVICE_INTERNAL_KEY;
 
-    let aiRes;
+    let result;
     try {
-      aiRes = await fetch(
+      const axiosRes = await axios.post(
         `${AI_BASE}/api/v1/channels/${workspace.ai_channel_id}/enroll`,
+        formData,
         {
-          method: "POST",
           headers: {
-            ...formData.getHeaders(), // Content-Type: multipart/form-data; boundary=---xxx
+            ...formData.getHeaders(),
             "X-Internal-Key": AI_KEY,
           },
-          body: formData,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
         },
       );
-    } catch (networkErr) {
+      result = axiosRes.data;
+    } catch (axiosErr) {
+      const status = axiosErr.response?.status || 503;
+      const detail =
+        axiosErr.response?.data?.detail ||
+        axiosErr.response?.data ||
+        axiosErr.message;
       throw Object.assign(
-        new Error(`AI Service unreachable: ${networkErr.message}`),
-        { statusCode: 503 },
+        new Error(`Enrollment failed (${status}): ${JSON.stringify(detail)}`),
+        { statusCode: status },
       );
     }
-
-    if (!aiRes.ok) {
-      const text = await aiRes.text().catch(() => "");
-      throw Object.assign(
-        new Error(`Enrollment failed (${aiRes.status}): ${text}`),
-        { statusCode: aiRes.status },
-      );
-    }
-
-    const result = await aiRes.json();
 
     // Save AI participant ID and mark voice_enrolled = true
     await db.WorkspaceMember.update(
@@ -343,7 +343,7 @@ export const enrollVoice = async (req, res) => {
         ai_participant_id: result.participant_id,
         voice_enrolled: true,
       },
-      { where: { workspace_id: workspaceId, user_id: userId } },
+      { where: { workspace_id: workspaceId, user_id: userId } }
     );
 
     return successResponse(
@@ -356,14 +356,14 @@ export const enrollVoice = async (req, res) => {
         status: result.status,
         quality_score: result.enrollment_quality_score,
         issues: result.issues || [],
-      },
+      }
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message,
+      err.message
     );
   }
 };
