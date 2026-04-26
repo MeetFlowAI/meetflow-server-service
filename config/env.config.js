@@ -47,4 +47,12 @@ export const envConfig = {
   // ── Stream Chat ────────────────────────────────────────────────────────────
   STREAM_API_KEY: process.env.STREAM_API_KEY,
   STREAM_API_SECRET: process.env.STREAM_API_SECRET,
+
+  // ── AI Service ─────────────────────────────────────────────────────────────
+  AI_SERVICE_URL: process.env.AI_SERVICE_URL || "http://localhost:8001",
+  AI_SERVICE_INTERNAL_KEY: process.env.AI_SERVICE_INTERNAL_KEY || "change-me",
+  AI_WEBHOOK_SECRET: process.env.AI_WEBHOOK_SECRET || "change-me",
+  BACKEND_WEBHOOK_URL:
+    process.env.BACKEND_WEBHOOK_URL ||
+    "http://localhost:8000/api/v1/webhook/ai",
 };

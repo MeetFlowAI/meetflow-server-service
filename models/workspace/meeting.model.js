@@ -84,6 +84,11 @@ export const MeetingModel = (sequelize, DataTypes, options = {}) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      // LiveKit Egress job ID — stored so we can stop it when meeting ends
+      livekit_egress_id: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       tableName: "meetings",

@@ -13,6 +13,11 @@ import {
   AccessToken,
   RoomServiceClient,
   WebhookReceiver,
+  EgressClient,
+  EncodedFileOutput,
+  EncodedFileType,
+  DirectFileOutput,
+  SegmentedFileOutput,
 } from "livekit-server-sdk";
 import { envConfig } from "../config/env.config.js";
 
@@ -28,6 +33,15 @@ const getRoomService = () => {
     _roomSvc = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
   }
   return _roomSvc;
+};
+
+// ─── Lazy singleton for the egress client ─────────────────────────────────────
+let _egressSvc = null;
+const getEgressClient = () => {
+  if (!_egressSvc) {
+    _egressSvc = new EgressClient(LK_URL, LK_API_KEY, LK_API_SECRET);
+  }
+  return _egressSvc;
 };
 
 // ─── Create a LiveKit room ────────────────────────────────────────────────────
@@ -140,3 +154,108 @@ export const generateJoinToken = async ({
 // Used in webhook controller to verify HMAC signatures from LiveKit
 export const getWebhookReceiver = () =>
   new WebhookReceiver(LK_API_KEY, LK_API_SECRET);
+
+// ─── Start Room Composite Egress (recording) ──────────────────────────────────
+/**
+ * Starts recording a LiveKit room to Supabase Storage via S3-compatible API.
+ *
+ * Supabase Storage exposes an S3-compatible endpoint:
+ *   https://<project-ref>.supabase.co/storage/v1/s3
+ *
+ * LiveKit Egress uploads the finished MP3 file directly to Supabase.
+ * The file path inside the bucket is: recordings/{roomName}/{timestamp}.mp3
+ *
+ * @param {string} roomName - LiveKit room name (e.g. "mf-uuid")
+ * @returns {Promise<string>} egressId - store on meeting record to stop it later
+ */
+export const startRoomRecording = async (roomName) => {
+  try {
+    const client = getEgressClient();
+
+    // Supabase S3-compatible endpoint
+    // Find yours: Supabase Dashboard → Storage → S3 Access
+    const supabaseRef = envConfig.SUPABASE_URL?.replace(
+      "https://",
+      "",
+    )?.replace(".supabase.co", "");
+
+    const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
+    const filePath = `${roomName}/${Date.now()}.mp3`;
+
+    const output = {
+      filepath: filePath,
+      disableManifest: true,
+      s3: {
+        accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
+        secret: envConfig.SUPABASE_S3_SECRET_KEY,
+        region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
+        endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
+        bucket,
+        forcePathStyle: true,
+      },
+    };
+
+    const egress = await client.startRoomCompositeEgress(roomName, {
+      file: output,
+      audioOnly: true, // MP3 audio-only — smaller file, faster upload, enough for AI
+      encodingOptions: {
+        audioCodec: "AAC",
+        audioBitrate: 128,
+      },
+    });
+
+    console.log(
+      `🎙️  Recording started for room "${roomName}" — egress: ${egress.egressId}`,
+    );
+    return egress.egressId;
+  } catch (err) {
+    // Non-fatal — meeting still works without recording
+    console.warn(
+      `⚠️  Could not start recording for room "${roomName}": ${err.message}`,
+    );
+    return null;
+  }
+};
+
+// ─── Stop Egress and get recording URL ────────────────────────────────────────
+/**
+ * Stops a running egress job and returns the public Supabase URL of the recording.
+ *
+ * @param {string} egressId  - From startRoomRecording()
+ * @param {string} roomName  - Used to construct the Supabase public URL
+ * @returns {Promise<string|null>} Public URL of the recording file, or null on failure
+ */
+export const stopRoomRecording = async (egressId, roomName) => {
+  if (!egressId) return null;
+
+  try {
+    const client = getEgressClient();
+
+    // Stop the egress — LiveKit finalises the file and uploads to Supabase
+    const result = await client.stopEgress(egressId);
+
+    // Build the public Supabase Storage URL
+    // Format: https://<ref>.supabase.co/storage/v1/object/public/<bucket>/<filepath>
+    const supabaseRef = envConfig.SUPABASE_URL?.replace(
+      "https://",
+      "",
+    )?.replace(".supabase.co", "");
+
+    const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
+
+    // result.fileResults contains the uploaded file path
+    const filePath =
+      result?.fileResults?.[0]?.filename || `${roomName}/${Date.now()}.mp3`;
+
+    // Strip bucket prefix from path if LiveKit includes it
+    const cleanPath = filePath.replace(new RegExp(`^${bucket}/`), "");
+
+    const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
+
+    console.log(`✅  Recording saved: ${publicUrl}`);
+    return publicUrl;
+  } catch (err) {
+    console.warn(`⚠️  Could not stop egress "${egressId}": ${err.message}`);
+    return null;
+  }
+};

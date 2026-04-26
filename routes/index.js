@@ -8,6 +8,8 @@ import OrganizationRoutes from "./organization/index.js";
 import WorkspaceRoutes from "./workspace/index.js";
 import LiveKitWebhookRoutes from "./webhook/livekit.route.js";
 import StreamChatRoutes from "./chat/stream.route.js";
+import AIWebhookRoutes from "./webhook/ai.route.js";
+
 
 const apiRoutes = Router();
 
@@ -37,5 +39,7 @@ apiRoutes.use("/chat", StreamChatRoutes);
 // LiveKit webhook — PUBLIC, no JWT, signature-verified internally
 // Register this URL in your LiveKit dashboard: Settings → Webhooks
 apiRoutes.use("/webhook/livekit", LiveKitWebhookRoutes);
+
+apiRoutes.use("/webhook/ai", AIWebhookRoutes);
 
 export default apiRoutes;
