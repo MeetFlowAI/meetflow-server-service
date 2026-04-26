@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,20 +19,22 @@ export async function runTenantMigrations(sequelize, schemaName) {
       );
     `);
 
-    const migrationsDir = path.join(__dirname, 'tenant');
+    const migrationsDir = path.join(__dirname, "tenant");
     const files = fs.readdirSync(migrationsDir).sort();
 
     for (const file of files) {
-      if (!file.endsWith('.js')) continue;
+      if (!file.endsWith(".js")) continue;
 
       // Check if migration has already been run
       const [results] = await sequelize.query(
         `SELECT name FROM "${schemaName}".sequelizemeta WHERE name = ?`,
-        { replacements: [file] }
+        { replacements: [file] },
       );
 
       if (results.length > 0) {
-        console.log(`⏭️  Skipping ${file} (already migrated for ${schemaName})`);
+        console.log(
+          `⏭️  Skipping ${file} (already migrated for ${schemaName})`,
+        );
         continue;
       }
 
@@ -46,7 +48,7 @@ export async function runTenantMigrations(sequelize, schemaName) {
       // Record migration
       await sequelize.query(
         `INSERT INTO "${schemaName}".sequelizemeta (name) VALUES (?)`,
-        { replacements: [file] }
+        { replacements: [file] },
       );
 
       console.log(`✅ Completed ${file} for ${schemaName}`);

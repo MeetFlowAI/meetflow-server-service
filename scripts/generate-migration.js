@@ -12,7 +12,8 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const question = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
+const question = (prompt) =>
+  new Promise((resolve) => rl.question(prompt, resolve));
 
 const migrations = {
   ADD_COLUMN: "addColumn",
@@ -34,9 +35,7 @@ const columnTypes = {
 async function main() {
   console.log("\n🚀 Tenant Migration Generator\n");
 
-  const type = await question(
-    "Migration type (add/drop/rename/modify): "
-  );
+  const type = await question("Migration type (add/drop/rename/modify): ");
   const table = await question("Table name (e.g., meetings): ");
   const column = await question("Column name (e.g., is_recorded): ");
 
@@ -45,10 +44,12 @@ async function main() {
 
   if (type.toLowerCase() === "add") {
     const columnType = await question(
-      `Column type (${Object.keys(columnTypes).join("/")}): `
+      `Column type (${Object.keys(columnTypes).join("/")}): `,
     );
     const nullable = await question("Allow NULL? (y/n): ");
-    const defaultValue = await question("Default value (leave blank for none): ");
+    const defaultValue = await question(
+      "Default value (leave blank for none): ",
+    );
 
     const sqlType = columnTypes[columnType] || "VARCHAR(255)";
     const notNull = nullable.toLowerCase() === "n" ? " NOT NULL" : "";

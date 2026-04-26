@@ -1,8 +1,8 @@
-'use strict';
+"use strict";
 
 /** @type {import('sequelize-cli').Migration} */
 export async function up(queryInterface, Sequelize, schema) {
-  const schemaName = schema || 'public';
+  const schemaName = schema || "public";
 
   await queryInterface.sequelize.query(`
     ALTER TABLE "${schemaName}".meetings ADD COLUMN IF NOT EXISTS ai_meeting_id UUID;
@@ -19,7 +19,7 @@ export async function up(queryInterface, Sequelize, schema) {
 }
 
 export async function down(queryInterface, Sequelize, schema) {
-  const schemaName = schema || 'public';
+  const schemaName = schema || "public";
 
   await queryInterface.sequelize.query(`
     ALTER TABLE "${schemaName}".meetings DROP COLUMN IF EXISTS ai_meeting_id;

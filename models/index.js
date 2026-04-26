@@ -1,6 +1,9 @@
 import { Sequelize, DataTypes } from "sequelize";
 import { dbConfig } from "../config/db.config.js";
-import { runTenantMigrations, runMigrationsForAllTenants } from "../migrations/migrationRunner.js";
+import {
+  runTenantMigrations,
+  runMigrationsForAllTenants,
+} from "../migrations/migrationRunner.js";
 
 // ================= INIT SEQUELIZE ================= //
 const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
