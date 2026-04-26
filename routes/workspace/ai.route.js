@@ -1,5 +1,5 @@
 import { Router } from "express";
-import authMiddleware from "../../middlewares/auth.middleware.js";
+import { authenticate } from "../../middlewares/auth.middleware.js";
 import multer from "multer";
 import {
   getAIStatus,
@@ -14,10 +14,10 @@ const AIRoutes = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Meeting AI endpoints — all under /:workspaceId/channels/:channelId/meetings/:meetingId/
-AIRoutes.get("/:meetingId/ai-status", authMiddleware, getAIStatus);
-AIRoutes.get("/:meetingId/ai-tasks", authMiddleware, getAITasks);
-AIRoutes.post("/:meetingId/ai-review", authMiddleware, submitAIMeetingReview);
-AIRoutes.get("/:meetingId/ai-transcript", authMiddleware, getAITranscript);
-AIRoutes.get("/:meetingId/ai-summary", authMiddleware, getAISummary);
+AIRoutes.get("/:meetingId/ai-status", authenticate, getAIStatus);
+AIRoutes.get("/:meetingId/ai-tasks", authenticate, getAITasks);
+AIRoutes.post("/:meetingId/ai-review", authenticate, submitAIMeetingReview);
+AIRoutes.get("/:meetingId/ai-transcript", authenticate, getAITranscript);
+AIRoutes.get("/:meetingId/ai-summary", authenticate, getAISummary);
 
 export default AIRoutes;

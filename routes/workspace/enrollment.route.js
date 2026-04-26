@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import authMiddleware from "../../middlewares/auth.middleware.js";
+import { authenticate } from "../../middlewares/auth.middleware.js";
 import { enrollVoice } from "../../controllers/workspace/ai.controller.js";
 
 const EnrollmentRoutes = Router({ mergeParams: true });
@@ -12,7 +12,7 @@ const upload = multer({
 // POST /workspace/:workspaceId/enroll-voice
 EnrollmentRoutes.post(
   "/",
-  authMiddleware,
+  authenticate,
   upload.array("audio_clips", 5),
   enrollVoice,
 );
