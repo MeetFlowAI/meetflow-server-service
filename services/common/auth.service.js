@@ -23,13 +23,17 @@ import { TOKEN_EXPIRY } from "../../constants/index.js";
  *  { user, userType: "master"|schema_name, tenantSchema: null|schema_name, org: null|org_row }
  */
 const resolveUser = async (email) => {
+  console.log("email:", email);
   const domain = extractDomain(email);
+  console.log("domain:", domain);
 
   if (!domain) throw new Error("Invalid email address.");
 
   // ── PATH A: free/personal domain → always master ──────────────────────────
   if (isFreeEmailDomain(domain)) {
+    console.log("check master user");
     const user = await AuthRepository.findMasterUserByEmail(email);
+    console.log("found user:", user);
     return {
       user,
       userType: "master",
@@ -47,6 +51,7 @@ const resolveUser = async (email) => {
       email,
       org.schema_name,
     );
+    console.log("found user in org:", user);
     return {
       user,
       userType: org.schema_name,
@@ -58,6 +63,7 @@ const resolveUser = async (email) => {
   // ── PATH C: corporate domain but no org registered → fallback to master ───
   // (covers future @meetflow.tech domain for staff)
   const user = await AuthRepository.findMasterUserByEmail(email);
+  console.log("found user in master:", user);
   return {
     user,
     userType: "master",
@@ -85,6 +91,8 @@ export const login = async ({
 
   const { user, userType, tenantSchema, org } =
     await resolveUser(normalizedEmail);
+
+  console.log("user check", { user, userType, tenantSchema, org });
 
   // Always return generic 401 — never reveal which table was checked
   if (!user) {

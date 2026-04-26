@@ -1,5 +1,6 @@
 import { Sequelize, DataTypes } from "sequelize";
 import { dbConfig } from "../config/db.config.js";
+import { runTenantMigrations, runMigrationsForAllTenants } from "../migrations/migrationRunner.js";
 
 // ================= INIT SEQUELIZE ================= //
 const sequelize = new Sequelize(dbConfig.DB, dbConfig.USER, dbConfig.PASSWORD, {
@@ -259,6 +260,9 @@ const provisionTenantSchema = async (schemaName) => {
 
   console.log(`✅ Tables synced for tenant: ${schemaName}`);
 
+  // 4. Run pending migrations
+  await runTenantMigrations(sequelize, schemaName);
+
   return tenantDb;
 };
 
@@ -299,8 +303,10 @@ const initializeDatabase = async () => {
 // ===============================================================
 export {
   sequelize,
-  masterDb, // use directly for all master_tenant queries
-  initTenantModels, // use per-request to get tenant models
-  provisionTenantSchema, // use once when creating a new org
-  initializeDatabase, // call at server startup
+  masterDb,
+  initTenantModels,
+  provisionTenantSchema,
+  initializeDatabase,
+  runTenantMigrations,
+  runMigrationsForAllTenants,
 };

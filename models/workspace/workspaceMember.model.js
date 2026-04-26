@@ -24,6 +24,17 @@ export const WorkspaceMemberModel = (sequelize, DataTypes, options = {}) => {
         type: DataTypes.ENUM(Object.values(USER_ROLES.WORKSPACE)),
         defaultValue: USER_ROLES.WORKSPACE.MEMBER,
       },
+      // UUID of this member's Participant record in the AI service
+      // Set after voiceprint enrollment
+      ai_participant_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+      },
+      voice_enrolled: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+        allowNull: false,
+      },
     },
     {
       tableName: "workspace_members",
