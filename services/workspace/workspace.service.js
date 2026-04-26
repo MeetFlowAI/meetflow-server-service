@@ -129,6 +129,8 @@ export const createWorkspace = async ({
       is_active: true,
     });
 
+    console.log("workspace is", workspace);
+
     // ── Owner assignment ──────────────────────────────────────────────────────
     // If owner_id is provided and is a valid org member, assign them as workspace_owner.
     // Otherwise fall back to the creator.
@@ -214,15 +216,15 @@ export const createWorkspace = async ({
       );
     }
 
-    return workspace;
-
     // ── Provision AI workspace context (non-blocking) ──────────────────────────
     try {
       const webhookUrl = envConfig.BACKEND_WEBHOOK_URL;
+      console.log("webhook url", webhookUrl);
       const aiResult = await provisionAIWorkspace({
         workspaceName: workspace.name,
         webhookUrl,
       });
+      console.log("ai result", aiResult);
       // Save AI channel UUID back to workspace record
       await WorkspaceRepository.updateWorkspace(tenantSchema, workspace.id, {
         ai_channel_id: aiResult.channel_id,
