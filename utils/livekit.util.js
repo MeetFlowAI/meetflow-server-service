@@ -123,7 +123,7 @@ export const startRoomRecording = async (roomName) => {
       "",
     )?.replace(".supabase.co", "");
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-    const filePath = `${roomName}/${Date.now()}.mp3`;
+    const filePath = `${roomName}/${Date.now()}`;
 
     // S3Upload must be a class instance — plain objects won't serialize correctly
     const s3 = new S3Upload({
@@ -218,15 +218,26 @@ export const stopRoomRecording = async (egressId, roomName) => {
         status === "EGRESS_LIMIT_REACHED";
 
       if (isComplete) {
-        const filePath =
-          info.fileResults?.[0]?.filename || `${roomName}/${Date.now()}.mp3`;
+        // Always use the actual filename LiveKit reports — never construct it.
+        // LiveKit may upload as .mp4 even for audio-only egress.
+        const filePath = info.fileResults?.[0]?.filename;
+
+        if (!filePath) {
+          console.warn(
+            `⚠️  Egress ${egressId} complete but no fileResults — cannot build URL`,
+          );
+          break;
+        }
 
         const supabaseRef = envConfig.SUPABASE_URL?.replace(
           "https://",
           "",
         )?.replace(".supabase.co", "");
         const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-        const cleanPath = filePath.replace(new RegExp(`^${bucket}/`), "");
+
+        // fileResults.filename from LiveKit already includes the full path e.g.
+        // "mf-xxx/1234567890.mp4" — strip bucket prefix if LiveKit prepends it
+        const cleanPath = filePath.replace(new RegExp(`^/?${bucket}/`), "");
 
         const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
         console.log(`✅  Recording saved: ${publicUrl}`);
