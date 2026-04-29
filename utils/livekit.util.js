@@ -218,14 +218,21 @@ export const stopRoomRecording = async (egressId, roomName) => {
         status === "EGRESS_LIMIT_REACHED";
 
       if (isComplete) {
-        // Always use the actual filename LiveKit reports — never construct it.
-        // LiveKit may upload as .mp4 even for audio-only egress.
-        const filePath = info.fileResults?.[0]?.filename;
+        // LiveKit v2 puts the result in info.file (single FileInfo),
+        // NOT info.fileResults[] (legacy array). Check both for safety.
+        const fileInfo = info.file?.filename
+          ? info.file
+          : info.fileResults?.[0];
+        const filePath = fileInfo?.filename;
+
+        console.log(`📦 Egress info.file:`, JSON.stringify(info.file));
+        console.log(
+          `📦 Egress info.fileResults:`,
+          JSON.stringify(info.fileResults),
+        );
 
         if (!filePath) {
-          console.warn(
-            `⚠️  Egress ${egressId} complete but no fileResults — cannot build URL`,
-          );
+          console.warn(`⚠️  Egress ${egressId} complete but no filename found`);
           break;
         }
 
@@ -234,9 +241,6 @@ export const stopRoomRecording = async (egressId, roomName) => {
           "",
         )?.replace(".supabase.co", "");
         const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-
-        // fileResults.filename from LiveKit already includes the full path e.g.
-        // "mf-xxx/1234567890.mp4" — strip bucket prefix if LiveKit prepends it
         const cleanPath = filePath.replace(new RegExp(`^/?${bucket}/`), "");
 
         const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
