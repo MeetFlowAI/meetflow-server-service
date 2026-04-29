@@ -16,6 +16,11 @@ const WorkspaceMemberRoutes = Router({ mergeParams: true });
 
 WorkspaceMemberRoutes.use(authenticate, requireOrgContext);
 
+// ── GET /me — returns current user's membership + voice_enrolled status ────────
+// Used by WorkspaceHome to decide whether to show enrollment banner.
+// Must be registered BEFORE any middleware that restricts by role.
+WorkspaceMemberRoutes.get("/me", WorkspaceMemberController.getMyMembership);
+
 // ─── Single-Record Routes ─────────────────────────────────────────────────────
 // GET    /workspace/:workspaceId/members/get-all-members
 // POST   /workspace/:workspaceId/members/add-member

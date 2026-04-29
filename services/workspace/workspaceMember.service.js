@@ -195,3 +195,30 @@ export const removeMember = async ({
     throw { statusCode: err.statusCode || 400, message: err.message };
   }
 };
+
+// ── Get current user's workspace membership details ───────────────────────────
+export const getMyMembership = async ({ tenantSchema, workspaceId, userId }) => {
+  try {
+    const member = await WorkspaceUserRepository.getWorkspaceMember(
+      tenantSchema,
+      workspaceId,
+      userId
+    );
+    if (!member) {
+      throw Object.assign(
+        new Error("You are not a member of this workspace."),
+        { statusCode: 404 }
+      );
+    }
+    return {
+      id: member.id,
+      user_id: member.user_id,
+      workspace_id: member.workspace_id,
+      role: member.role,
+      voice_enrolled: member.voice_enrolled ?? false,
+      ai_participant_id: member.ai_participant_id ?? null,
+    };
+  } catch (err) {
+    throw { statusCode: err.statusCode || 400, message: err.message };
+  }
+};

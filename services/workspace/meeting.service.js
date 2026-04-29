@@ -202,7 +202,7 @@ export const startMeeting = async ({
       meeting: formatMeeting(meeting),
       livekit_room_name: livekitRoomName,
       token, // ← frontend passes this directly to <LiveKitRoom server={LK_URL} token={token} />
-      livekit_url: process.env.LIVEKIT_URL,
+      livekit_url: envConfig.LIVEKIT_URL,
       role: "host",
     };
   } catch (err) {
@@ -294,7 +294,7 @@ export const joinMeeting = async ({
       meeting: formatMeeting(meeting),
       livekit_room_name: meeting.livekit_room_name,
       token,
-      livekit_url: process.env.LIVEKIT_URL,
+      livekit_url: envConfig.LIVEKIT_URL,
       role: "guest",
     };
   } catch (err) {
@@ -397,10 +397,11 @@ export const endMeeting = async ({
           return;
         }
 
-        // recording_url is set by LiveKit Egress when recording is ready.
-        // Until Egress is configured, set it manually on the meeting record for testing.
-        const recordingUrl = updated.recording_url;
-        if (!recordingUrl) {
+        // Use the recordingUrl from the outer scope (already fetched from stopRoomRecording)
+        // Do NOT read updated.recording_url — that shadows the outer variable and
+        // may be stale if Sequelize hasn't fully committed yet.
+        const audioUrl = recordingUrl;
+        if (!audioUrl) {
           console.log(
             `ℹ️ AI: meeting ${meetingId} has no recording_url — pipeline skipped`,
           );
