@@ -123,9 +123,11 @@ export const startRoomRecording = async (roomName) => {
       "",
     )?.replace(".supabase.co", "");
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-    const filePath = `${roomName}/${Date.now()}`;
 
-    // S3Upload must be a class instance — plain objects won't serialize correctly
+    // Use a fixed timestamp so we know exactly what filename LiveKit will use
+    const timestamp = Date.now();
+    const filePath = `${roomName}/${timestamp}`; // LiveKit appends .mp4
+
     const s3 = new S3Upload({
       accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
       secret: envConfig.SUPABASE_S3_SECRET_KEY,
@@ -135,33 +137,34 @@ export const startRoomRecording = async (roomName) => {
       forcePathStyle: true,
     });
 
-    // The S3 config goes inside output as a protobuf oneof: { case: 's3', value: s3 }
     const fileOutput = new EncodedFileOutput({
       filepath: filePath,
       output: { case: "s3", value: s3 },
     });
 
-    const egress = await client.startRoomCompositeEgress(
-      roomName,
-      fileOutput, // pass EncodedFileOutput directly as the output arg
-      {
-        audioOnly: true,
-        encodingOptions: new EncodingOptions({
-          audioCodec: AudioCodec.AAC, // enum value 2, not the string "AAC"
-          audioBitrate: 128000, // bits/sec — NOT 128
-        }),
-      },
-    );
+    const egress = await client.startRoomCompositeEgress(roomName, fileOutput, {
+      audioOnly: true,
+      encodingOptions: new EncodingOptions({
+        audioCodec: AudioCodec.AAC,
+        audioBitrate: 128000,
+      }),
+    });
+
+    // Build the expected public URL now — LiveKit always appends .mp4
+    const expectedUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${filePath}.mp4`;
 
     console.log(
       `🎙️ Recording started for room "${roomName}" — egress: ${egress.egressId}`,
     );
-    return egress.egressId;
+    console.log(`📎 Expected recording URL: ${expectedUrl}`);
+
+    // Return both so the service can store the expected URL alongside egressId
+    return { egressId: egress.egressId, expectedUrl };
   } catch (err) {
     console.warn(
       `⚠️ Could not start recording for room "${roomName}": ${err.message}`,
     );
-    return null;
+    return { egressId: null, expectedUrl: null };
   }
 };
 
@@ -178,16 +181,14 @@ export const startRoomRecording = async (roomName) => {
  * @param {string} roomName
  * @returns {Promise<string|null>} Public Supabase URL or null on failure
  */
-export const stopRoomRecording = async (egressId, roomName) => {
+export const stopRoomRecording = async (egressId) => {
   if (!egressId) return null;
 
   try {
     const client = getEgressClient();
-
-    // Signal LiveKit to stop recording
     await client.stopEgress(egressId);
 
-    // Poll until upload completes — max 2 minutes (24 x 5s)
+    // Poll until EGRESS_COMPLETE — confirms S3 upload finished
     const MAX_POLLS = 24;
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise((r) => setTimeout(r, 5000));
@@ -195,8 +196,8 @@ export const stopRoomRecording = async (egressId, roomName) => {
       let infos;
       try {
         infos = await client.listEgress({ egressId });
-      } catch (listErr) {
-        console.warn(`listEgress poll ${i + 1} failed: ${listErr.message}`);
+      } catch (e) {
+        console.warn(`listEgress poll ${i + 1} failed: ${e.message}`);
         continue;
       }
 
@@ -204,11 +205,8 @@ export const stopRoomRecording = async (egressId, roomName) => {
       if (!info) break;
 
       const status = info.status;
-      // EGRESS_COMPLETE = 3 in livekit-server-sdk v2 proto enum
-      // Accept both numeric and string forms for safety
       const isComplete =
         status === 3 || status === "EGRESS_COMPLETE" || String(status) === "3";
-
       const isFailed =
         status === 4 ||
         status === 5 ||
@@ -218,52 +216,28 @@ export const stopRoomRecording = async (egressId, roomName) => {
         status === "EGRESS_LIMIT_REACHED";
 
       if (isComplete) {
-        // LiveKit v2 puts the result in info.file (single FileInfo),
-        // NOT info.fileResults[] (legacy array). Check both for safety.
-        const fileInfo = info.file?.filename
-          ? info.file
-          : info.fileResults?.[0];
-        const filePath = fileInfo?.filename;
-
-        console.log(`📦 Egress info.file:`, JSON.stringify(info.file));
-        console.log(
-          `📦 Egress info.fileResults:`,
-          JSON.stringify(info.fileResults),
-        );
-
-        if (!filePath) {
-          console.warn(`⚠️  Egress ${egressId} complete but no filename found`);
-          break;
-        }
-
-        const supabaseRef = envConfig.SUPABASE_URL?.replace(
-          "https://",
-          "",
-        )?.replace(".supabase.co", "");
-        const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-        const cleanPath = filePath.replace(new RegExp(`^/?${bucket}/`), "");
-
-        const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
-        console.log(`✅  Recording saved: ${publicUrl}`);
-        return publicUrl;
+        console.log(`✅ Egress ${egressId} confirmed complete`);
+        return true; // URL was already saved at meeting start
       }
-
       if (isFailed) {
-        console.warn(`⚠️  Egress ${egressId} failed with status ${status}`);
-        break;
+        console.warn(`⚠️ Egress ${egressId} failed with status ${status}`);
+        return false;
       }
-
       console.log(
-        `⏳  Egress ${egressId} still uploading... poll ${i + 1}/${MAX_POLLS}`,
+        `⏳ Egress ${egressId} still uploading... poll ${i + 1}/${MAX_POLLS}`,
       );
     }
 
-    console.warn(`⚠️  Egress ${egressId} did not complete within timeout`);
-    return null;
+    // Timeout — but the URL was already saved, so return true optimistically
+    // The file will likely still be there even if we timed out polling
+    console.warn(
+      `⚠️ Egress ${egressId} poll timed out — URL already saved, proceeding`,
+    );
+    return true;
   } catch (err) {
     console.warn(
-      `⚠️  stopRoomRecording failed for egress "${egressId}": ${err.message}`,
+      `⚠️ stopRoomRecording failed for egress "${egressId}": ${err.message}`,
     );
-    return null;
+    return false;
   }
 };

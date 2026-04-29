@@ -154,7 +154,7 @@ export const startMeeting = async ({
 
     // Start recording immediately after room creation
     // Egress uploads audio to Supabase Storage when stopped
-    const egressId = await startRoomRecording(livekitRoomName);
+    const { egressId, expectedUrl } = await startRoomRecording(livekitRoomName);
 
     // Save meeting record
     const meeting = await MeetingRepository.createMeeting(tenantSchema, {
@@ -167,6 +167,7 @@ export const startMeeting = async ({
       livekit_room_name: livekitRoomName,
       participant_count: 1,
       livekit_egress_id: egressId || null,
+      expected_recording_url: expectedUrl || null,
     });
 
     // Record host as first participant
@@ -359,10 +360,9 @@ export const endMeeting = async ({
       );
     }
 
-    const recordingUrl = await stopRoomRecording(
-      meeting.livekit_egress_id,
-      meeting.livekit_room_name,
-    );
+    await stopRoomRecording(meeting.livekit_egress_id);
+
+    const recordingUrl = meeting.recording_url;
 
     await deleteLiveKitRoom(meeting.livekit_room_name).catch((err) => {
       // Room may already be empty/gone — non-fatal
@@ -377,7 +377,6 @@ export const endMeeting = async ({
       {
         status: "ended",
         ended_at: endedAt,
-        recording_url: recordingUrl || null,
       },
     );
 
