@@ -27,18 +27,24 @@ const LK_API_SECRET = envConfig.LIVEKIT_API_SECRET;
 // ─── Singletons ───────────────────────────────────────────────────────────────
 let _roomSvc = null;
 const getRoomService = () => {
-  if (!_roomSvc) _roomSvc = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
+  if (!_roomSvc)
+    _roomSvc = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
   return _roomSvc;
 };
 
 let _egressSvc = null;
 const getEgressClient = () => {
-  if (!_egressSvc) _egressSvc = new EgressClient(LK_URL, LK_API_KEY, LK_API_SECRET);
+  if (!_egressSvc)
+    _egressSvc = new EgressClient(LK_URL, LK_API_KEY, LK_API_SECRET);
   return _egressSvc;
 };
 
 // ─── Room management ──────────────────────────────────────────────────────────
-export const createLiveKitRoom = async (roomName, maxParticipants = 10, emptyTimeoutSeconds = 300) => {
+export const createLiveKitRoom = async (
+  roomName,
+  maxParticipants = 10,
+  emptyTimeoutSeconds = 300,
+) => {
   const svc = getRoomService();
   return svc.createRoom({
     name: roomName,
@@ -58,7 +64,12 @@ export const getLiveKitParticipants = async (roomName) => {
 };
 
 // ─── Token generation ─────────────────────────────────────────────────────────
-export const generateJoinToken = ({ roomName, participantName, participantId, isHost = false }) => {
+export const generateJoinToken = ({
+  roomName,
+  participantName,
+  participantId,
+  isHost = false,
+}) => {
   const at = new AccessToken(LK_API_KEY, LK_API_SECRET, {
     identity: String(participantId),
     name: participantName,
@@ -94,19 +105,17 @@ export const startRoomRecording = async (roomName) => {
   try {
     const client = getEgressClient();
 
-    const supabaseRef = envConfig.SUPABASE_URL
-      ?.replace("https://", "")
-      ?.replace(".supabase.co", "");
+    const supabaseRef = envConfig.SUPABASE_URL?.replace(
+      "https://",
+      "",
+    )?.replace(".supabase.co", "");
 
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-    const timestamp = Date.now();
-    const filePath = `${roomName}/${timestamp}.mp3`;
+    const filePath = `${roomName}/${Date.now()}.mp3`;
 
-    // Plain object — v2 SDK accepts this without named type imports
-    const egressInfo = await client.startRoomCompositeEgress(roomName, {
-      file: {
-        filepath: filePath,
-        disableManifest: true,
+    const fileOutput = new EncodedFileOutput({
+      filepath: filePath,
+      output: {
         s3: {
           accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
           secret: envConfig.SUPABASE_S3_SECRET_KEY,
@@ -116,14 +125,26 @@ export const startRoomRecording = async (roomName) => {
           forcePathStyle: true,
         },
       },
-      audioOnly: true,
     });
 
-    console.log(`🎙️  Recording started for room "${roomName}" → egress: ${egressInfo.egressId}`);
-    return egressInfo.egressId;
+    const egress = await client.startRoomCompositeEgress(roomName, {
+      file: fileOutput,
+      audioOnly: true,
+      encodingOptions: {
+        audioCodec: "AAC",
+        audioBitrate: 128,
+      },
+    });
+
+    console.log(
+      `🎙️ Recording started for room "${roomName}" — egress: ${egress.egressId}`,
+    );
+
+    return egress.egressId;
   } catch (err) {
-    // Non-fatal — meeting still works without recording (AI pipeline won't trigger)
-    console.warn(`⚠️  startRoomRecording failed for "${roomName}": ${err.message}`);
+    console.warn(
+      `⚠️ Could not start recording for room "${roomName}": ${err.message}`,
+    );
     return null;
   }
 };
@@ -170,9 +191,7 @@ export const stopRoomRecording = async (egressId, roomName) => {
       // EGRESS_COMPLETE = 3 in livekit-server-sdk v2 proto enum
       // Accept both numeric and string forms for safety
       const isComplete =
-        status === 3 ||
-        status === "EGRESS_COMPLETE" ||
-        String(status) === "3";
+        status === 3 || status === "EGRESS_COMPLETE" || String(status) === "3";
 
       const isFailed =
         status >= 4 ||
@@ -184,9 +203,10 @@ export const stopRoomRecording = async (egressId, roomName) => {
         const filePath =
           info.fileResults?.[0]?.filename || `${roomName}/${Date.now()}.mp3`;
 
-        const supabaseRef = envConfig.SUPABASE_URL
-          ?.replace("https://", "")
-          ?.replace(".supabase.co", "");
+        const supabaseRef = envConfig.SUPABASE_URL?.replace(
+          "https://",
+          "",
+        )?.replace(".supabase.co", "");
         const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
         const cleanPath = filePath.replace(new RegExp(`^${bucket}/`), "");
 
@@ -200,13 +220,17 @@ export const stopRoomRecording = async (egressId, roomName) => {
         break;
       }
 
-      console.log(`⏳  Egress ${egressId} still uploading... poll ${i + 1}/${MAX_POLLS}`);
+      console.log(
+        `⏳  Egress ${egressId} still uploading... poll ${i + 1}/${MAX_POLLS}`,
+      );
     }
 
     console.warn(`⚠️  Egress ${egressId} did not complete within timeout`);
     return null;
   } catch (err) {
-    console.warn(`⚠️  stopRoomRecording failed for egress "${egressId}": ${err.message}`);
+    console.warn(
+      `⚠️  stopRoomRecording failed for egress "${egressId}": ${err.message}`,
+    );
     return null;
   }
 };
