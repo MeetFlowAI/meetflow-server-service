@@ -13,16 +13,27 @@ const aiHeaders = () => ({
   "X-Internal-Key": AI_KEY,
 });
 
+// Fix: added network error handling (was missing try/catch on fetch)
 const aiFetch = async (method, path, body = null) => {
   const opts = { method, headers: aiHeaders() };
   if (body) opts.body = JSON.stringify(body);
 
-  const res = await fetch(`${AI_BASE}${path}`, opts);
+  let res;
+  try {
+    res = await fetch(`${AI_BASE}${path}`, opts);
+  } catch (networkErr) {
+    throw Object.assign(
+      new Error(`AI Service unreachable (${path}): ${networkErr.message}`),
+      { statusCode: 503 }
+    );
+  }
+
   if (!res.ok) {
-    const text = await res.text();
-    throw Object.assign(new Error(`AI Service ${res.status}: ${text}`), {
-      statusCode: res.status,
-    });
+    const text = await res.text().catch(() => "");
+    throw Object.assign(
+      new Error(`AI Service ${res.status}: ${text}`),
+      { statusCode: res.status }
+    );
   }
   return res.json();
 };
@@ -33,37 +44,19 @@ export const provisionAIWorkspace = async ({ workspaceName, webhookUrl }) => {
     name: workspaceName,
     webhook_url: webhookUrl,
   });
-  // Returns: { channel_id: UUID, created_at: string }
 };
 
-// ── Enroll voiceprint (multipart — caller provides FormData) ──────────────
-export const enrollVoiceprintInAI = async (aiChannelId, formData) => {
-  const res = await fetch(
-    `${AI_BASE}/api/v1/channels/${aiChannelId}/enroll`,
-    {
-      method: "POST",
-      headers: { "X-Internal-Key": AI_KEY },
-      // Do NOT set Content-Type — fetch sets it with correct boundary
-      body: formData,
-    }
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    throw Object.assign(new Error(`Enrollment failed: ${text}`), {
-      statusCode: res.status,
-    });
-  }
-  return res.json();
-  // Returns: { participant_id: UUID, status: "enrolled", enrollment_quality_score: 0.87 }
-};
+// NOTE: enrollVoiceprintInAI removed — enrollment uses axios directly in
+// controllers/workspace/ai.controller.js to correctly handle multipart/form-data
+// with FastAPI. Do NOT add it back here.
 
 // ── Trigger AI pipeline after meeting ends ────────────────────────────────
 export const triggerAIPipeline = async ({
   audioUrl,
   aiChannelId,
-  externalId,    // "{tenantSchema}__{meetingId}" — used to route webhook back
+  externalId,
   meetingType,
-  participantIds, // array of AI participant UUIDs
+  participantIds,
   webhookUrl,
   languageCode = "en-IN",
 }) => {
@@ -77,7 +70,6 @@ export const triggerAIPipeline = async ({
     language_code: languageCode,
     auto_detect_speakers: participantIds.length === 0,
   });
-  // Returns: { meeting_id: UUID, status: "pending" }
 };
 
 // ── Get pipeline status ──────────────────────────────────────────────────

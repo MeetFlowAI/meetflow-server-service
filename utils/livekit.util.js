@@ -1,12 +1,15 @@
 /**
  * utils/livekit.util.js
  *
- * All LiveKit SDK interactions live here.
- * Nothing else in the codebase imports from livekit-server-sdk directly.
+ * LiveKit server-side utilities:
+ *  - Room management (create, delete, participants)
+ *  - Token generation
+ *  - Room Composite Egress (audio recording → Supabase S3)
+ *  - Webhook receiver
  *
- * Two main jobs:
- *   1. RoomServiceClient  — server-to-LiveKit API calls (create room, delete room, list participants)
- *   2. AccessToken        — generate JWT tokens that the FRONTEND uses to join a room
+ * SDK: livekit-server-sdk v2.15.x
+ * NOTE: In v2, EncodedFileOutput/DirectFileOutput are NOT named exports.
+ *       Pass plain objects for egress output configuration.
  */
 
 import {
@@ -14,216 +17,129 @@ import {
   RoomServiceClient,
   WebhookReceiver,
   EgressClient,
-  EncodedFileOutput,
-  EncodedFileType,
-  DirectFileOutput,
-  SegmentedFileOutput,
 } from "livekit-server-sdk";
 import { envConfig } from "../config/env.config.js";
 
+const LK_URL = envConfig.LIVEKIT_URL;
 const LK_API_KEY = envConfig.LIVEKIT_API_KEY;
 const LK_API_SECRET = envConfig.LIVEKIT_API_SECRET;
-const LK_URL = envConfig.LIVEKIT_URL; // wss://meetflow-xxx.livekit.cloud
 
-// ─── Lazy singleton for the room service ─────────────────────────────────────
-// RoomServiceClient uses HTTP (converts wss→https internally)
+// ─── Singletons ───────────────────────────────────────────────────────────────
 let _roomSvc = null;
 const getRoomService = () => {
-  if (!_roomSvc) {
-    _roomSvc = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
-  }
+  if (!_roomSvc) _roomSvc = new RoomServiceClient(LK_URL, LK_API_KEY, LK_API_SECRET);
   return _roomSvc;
 };
 
-// ─── Lazy singleton for the egress client ─────────────────────────────────────
 let _egressSvc = null;
 const getEgressClient = () => {
-  if (!_egressSvc) {
-    _egressSvc = new EgressClient(LK_URL, LK_API_KEY, LK_API_SECRET);
-  }
+  if (!_egressSvc) _egressSvc = new EgressClient(LK_URL, LK_API_KEY, LK_API_SECRET);
   return _egressSvc;
 };
 
-// ─── Create a LiveKit room ────────────────────────────────────────────────────
-/**
- * @param {string} roomName       - Unique room identifier (we use a UUID-based slug)
- * @param {number} maxParticipants - From plan limits (default 100)
- * @param {number} emptyTimeout   - Seconds before auto-close when empty (default 300 = 5 min)
- * @returns {Promise<object>}     - LiveKit room object
- */
-export const createLiveKitRoom = async (
-  roomName,
-  maxParticipants = 100,
-  emptyTimeout = 300,
-) => {
+// ─── Room management ──────────────────────────────────────────────────────────
+export const createLiveKitRoom = async (roomName, maxParticipants = 10, emptyTimeoutSeconds = 300) => {
   const svc = getRoomService();
-  const room = await svc.createRoom({
+  return svc.createRoom({
     name: roomName,
-    maxParticipants: parseInt(maxParticipants, 10),
-    emptyTimeout: parseInt(emptyTimeout, 10),
-    metadata: JSON.stringify({ createdAt: new Date().toISOString() }),
+    maxParticipants,
+    emptyTimeout: emptyTimeoutSeconds,
   });
-  return room;
 };
 
-// ─── Delete / end a LiveKit room ──────────────────────────────────────────────
-/**
- * Kicks all participants and closes the room immediately.
- * Non-fatal — if the room is already gone, we just log a warning.
- */
 export const deleteLiveKitRoom = async (roomName) => {
-  try {
-    const svc = getRoomService();
-    await svc.deleteRoom(roomName);
-    console.log(`🗑️  LiveKit room deleted: ${roomName}`);
-  } catch (err) {
-    console.warn(
-      `⚠️  Could not delete LiveKit room "${roomName}":`,
-      err.message,
-    );
-  }
+  const svc = getRoomService();
+  return svc.deleteRoom(roomName);
 };
 
-// ─── Get room info ────────────────────────────────────────────────────────────
-/**
- * Returns the room object or null if it doesn't exist / has already ended.
- */
-export const getLiveKitRoom = async (roomName) => {
-  try {
-    const svc = getRoomService();
-    const rooms = await svc.listRooms([roomName]);
-    return rooms[0] || null;
-  } catch {
-    return null;
-  }
-};
-
-// ─── List participants currently in a room ────────────────────────────────────
 export const getLiveKitParticipants = async (roomName) => {
-  try {
-    const svc = getRoomService();
-    return await svc.listParticipants(roomName);
-  } catch {
-    return [];
-  }
+  const svc = getRoomService();
+  return svc.listParticipants(roomName);
 };
 
-// ─── Generate a participant join token ───────────────────────────────────────
-/**
- * This JWT is what the FRONTEND passes to `<LiveKitRoom>` / `@livekit/components-react`.
- * It authorises one user to join one specific room.
- *
- * @param {object} opts
- * @param {string} opts.roomName        - The LiveKit room name
- * @param {string|number} opts.identity - Unique per-user ID (we use userId from DB)
- * @param {string} opts.participantName - Display name shown to other participants
- * @param {boolean} opts.canPublish     - Can send audio/video (false = viewer only)
- * @param {boolean} opts.canSubscribe   - Can receive others' audio/video
- * @param {boolean} opts.canPublishData - Can send data messages (chat, reactions)
- * @param {number} opts.ttlSeconds      - Token lifetime in seconds (default 4 hours)
- * @returns {Promise<string>}           - Signed JWT string
- */
-export const generateJoinToken = async ({
-  roomName,
-  identity,
-  participantName,
-  canPublish = true,
-  canSubscribe = true,
-  canPublishData = true,
-  ttlSeconds = 14400, // 4 hours
-}) => {
+// ─── Token generation ─────────────────────────────────────────────────────────
+export const generateJoinToken = ({ roomName, participantName, participantId, isHost = false }) => {
   const at = new AccessToken(LK_API_KEY, LK_API_SECRET, {
-    identity: String(identity),
+    identity: String(participantId),
     name: participantName,
-    ttl: ttlSeconds,
+    ttl: "4h",
   });
-
   at.addGrant({
-    roomJoin: true,
     room: roomName,
-    canPublish,
-    canSubscribe,
-    canPublishData,
+    roomJoin: true,
+    canPublish: true,
+    canSubscribe: true,
+    canPublishData: true,
+    roomAdmin: isHost,
+    roomRecord: isHost,
   });
-
-  // toJwt() is async in livekit-server-sdk v2+
-  return await at.toJwt();
+  return at.toJwt();
 };
 
 // ─── Webhook Receiver ─────────────────────────────────────────────────────────
-// Used in webhook controller to verify HMAC signatures from LiveKit
 export const getWebhookReceiver = () =>
   new WebhookReceiver(LK_API_KEY, LK_API_SECRET);
 
-// ─── Start Room Composite Egress (recording) ──────────────────────────────────
+// ─── Start Room Composite Egress (audio-only recording) ───────────────────────
 /**
- * Starts recording a LiveKit room to Supabase Storage via S3-compatible API.
+ * Starts an audio-only recording of a LiveKit room.
+ * Uploads MP3 to Supabase Storage via S3-compatible API.
  *
- * Supabase Storage exposes an S3-compatible endpoint:
- *   https://<project-ref>.supabase.co/storage/v1/s3
+ * Uses plain objects for output config (v2 SDK — no named type exports needed).
  *
- * LiveKit Egress uploads the finished MP3 file directly to Supabase.
- * The file path inside the bucket is: recordings/{roomName}/{timestamp}.mp3
- *
- * @param {string} roomName - LiveKit room name (e.g. "mf-uuid")
- * @returns {Promise<string>} egressId - store on meeting record to stop it later
+ * @param {string} roomName
+ * @returns {Promise<string|null>} egressId — store on meeting record
  */
 export const startRoomRecording = async (roomName) => {
   try {
     const client = getEgressClient();
 
-    // Supabase S3-compatible endpoint
-    // Find yours: Supabase Dashboard → Storage → S3 Access
-    const supabaseRef = envConfig.SUPABASE_URL?.replace(
-      "https://",
-      "",
-    )?.replace(".supabase.co", "");
+    const supabaseRef = envConfig.SUPABASE_URL
+      ?.replace("https://", "")
+      ?.replace(".supabase.co", "");
 
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-    const filePath = `${roomName}/${Date.now()}.mp3`;
+    const timestamp = Date.now();
+    const filePath = `${roomName}/${timestamp}.mp3`;
 
-    const output = {
-      filepath: filePath,
-      disableManifest: true,
-      s3: {
-        accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
-        secret: envConfig.SUPABASE_S3_SECRET_KEY,
-        region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
-        endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
-        bucket,
-        forcePathStyle: true,
+    // Plain object — v2 SDK accepts this without named type imports
+    const egressInfo = await client.startRoomCompositeEgress(roomName, {
+      file: {
+        filepath: filePath,
+        disableManifest: true,
+        s3: {
+          accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
+          secret: envConfig.SUPABASE_S3_SECRET_KEY,
+          region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
+          endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
+          bucket,
+          forcePathStyle: true,
+        },
       },
-    };
-
-    const egress = await client.startRoomCompositeEgress(roomName, {
-      file: output,
-      audioOnly: true, // MP3 audio-only — smaller file, faster upload, enough for AI
-      encodingOptions: {
-        audioCodec: "AAC",
-        audioBitrate: 128,
-      },
+      audioOnly: true,
     });
 
-    console.log(
-      `🎙️  Recording started for room "${roomName}" — egress: ${egress.egressId}`,
-    );
-    return egress.egressId;
+    console.log(`🎙️  Recording started for room "${roomName}" → egress: ${egressInfo.egressId}`);
+    return egressInfo.egressId;
   } catch (err) {
-    // Non-fatal — meeting still works without recording
-    console.warn(
-      `⚠️  Could not start recording for room "${roomName}": ${err.message}`,
-    );
+    // Non-fatal — meeting still works without recording (AI pipeline won't trigger)
+    console.warn(`⚠️  startRoomRecording failed for "${roomName}": ${err.message}`);
     return null;
   }
 };
 
-// ─── Stop Egress and get recording URL ────────────────────────────────────────
+// ─── Stop Egress and wait for upload to complete ──────────────────────────────
 /**
- * Stops a running egress job and returns the public Supabase URL of the recording.
+ * Stops a running egress job and polls until the file is fully uploaded
+ * to Supabase before returning the public URL.
  *
- * @param {string} egressId  - From startRoomRecording()
- * @param {string} roomName  - Used to construct the Supabase public URL
- * @returns {Promise<string|null>} Public URL of the recording file, or null on failure
+ * IMPORTANT: stopEgress() only signals LiveKit to stop — the S3 upload
+ * happens asynchronously afterward. We must poll until EGRESS_COMPLETE
+ * before returning the URL, otherwise the AI service will get a 404.
+ *
+ * @param {string} egressId
+ * @param {string} roomName
+ * @returns {Promise<string|null>} Public Supabase URL or null on failure
  */
 export const stopRoomRecording = async (egressId, roomName) => {
   if (!egressId) return null;
@@ -231,31 +147,66 @@ export const stopRoomRecording = async (egressId, roomName) => {
   try {
     const client = getEgressClient();
 
-    // Stop the egress — LiveKit finalises the file and uploads to Supabase
-    const result = await client.stopEgress(egressId);
+    // Signal LiveKit to stop recording
+    await client.stopEgress(egressId);
 
-    // Build the public Supabase Storage URL
-    // Format: https://<ref>.supabase.co/storage/v1/object/public/<bucket>/<filepath>
-    const supabaseRef = envConfig.SUPABASE_URL?.replace(
-      "https://",
-      "",
-    )?.replace(".supabase.co", "");
+    // Poll until upload completes — max 2 minutes (24 x 5s)
+    const MAX_POLLS = 24;
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
 
-    const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
+      let infos;
+      try {
+        infos = await client.listEgress({ egressId });
+      } catch (listErr) {
+        console.warn(`listEgress poll ${i + 1} failed: ${listErr.message}`);
+        continue;
+      }
 
-    // result.fileResults contains the uploaded file path
-    const filePath =
-      result?.fileResults?.[0]?.filename || `${roomName}/${Date.now()}.mp3`;
+      const info = infos?.[0];
+      if (!info) break;
 
-    // Strip bucket prefix from path if LiveKit includes it
-    const cleanPath = filePath.replace(new RegExp(`^${bucket}/`), "");
+      const status = info.status;
+      // EGRESS_COMPLETE = 3 in livekit-server-sdk v2 proto enum
+      // Accept both numeric and string forms for safety
+      const isComplete =
+        status === 3 ||
+        status === "EGRESS_COMPLETE" ||
+        String(status) === "3";
 
-    const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
+      const isFailed =
+        status >= 4 ||
+        status === "EGRESS_FAILED" ||
+        status === "EGRESS_ABORTED" ||
+        status === "EGRESS_ENDING";
 
-    console.log(`✅  Recording saved: ${publicUrl}`);
-    return publicUrl;
+      if (isComplete) {
+        const filePath =
+          info.fileResults?.[0]?.filename || `${roomName}/${Date.now()}.mp3`;
+
+        const supabaseRef = envConfig.SUPABASE_URL
+          ?.replace("https://", "")
+          ?.replace(".supabase.co", "");
+        const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
+        const cleanPath = filePath.replace(new RegExp(`^${bucket}/`), "");
+
+        const publicUrl = `https://${supabaseRef}.supabase.co/storage/v1/object/public/${bucket}/${cleanPath}`;
+        console.log(`✅  Recording saved: ${publicUrl}`);
+        return publicUrl;
+      }
+
+      if (isFailed) {
+        console.warn(`⚠️  Egress ${egressId} failed with status ${status}`);
+        break;
+      }
+
+      console.log(`⏳  Egress ${egressId} still uploading... poll ${i + 1}/${MAX_POLLS}`);
+    }
+
+    console.warn(`⚠️  Egress ${egressId} did not complete within timeout`);
+    return null;
   } catch (err) {
-    console.warn(`⚠️  Could not stop egress "${egressId}": ${err.message}`);
+    console.warn(`⚠️  stopRoomRecording failed for egress "${egressId}": ${err.message}`);
     return null;
   }
 };

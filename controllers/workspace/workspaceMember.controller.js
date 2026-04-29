@@ -107,3 +107,31 @@ export const removeMember = async (req, res) => {
     );
   }
 };
+
+// ── GET /me — current user's workspace membership ─────────────────────────────
+// Returns voice_enrolled, ai_participant_id, and role.
+// Used by WorkspaceHome to conditionally show the enrollment banner.
+export const getMyMembership = async (req, res) => {
+  try {
+    const data = await WorkspaceMemberService.getMyMembership({
+      tenantSchema: req.user.tenantSchema,
+      workspaceId: req.params.workspaceId,
+      userId: req.user.userId,
+    });
+    return successResponse(
+      res,
+      STATUS_CODES.OK,
+      RESPONSE_MESSAGES.SUCCESS,
+      "Membership retrieved",
+      data
+    );
+  } catch (err) {
+    return errorResponse(
+      res,
+      err.statusCode || STATUS_CODES.BAD_REQUEST,
+      RESPONSE_MESSAGES.ERROR,
+      err.message,
+      err
+    );
+  }
+};
