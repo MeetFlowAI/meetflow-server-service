@@ -111,14 +111,11 @@ export const startRoomRecording = async (roomName) => {
     )?.replace(".supabase.co", "");
 
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
-    const timestamp = Date.now();
-    const filePath = `${roomName}/${timestamp}.mp3`;
+    const filePath = `${roomName}/${Date.now()}.mp3`;
 
-    // Plain object — v2 SDK accepts this without named type imports
-    const egressInfo = await client.startRoomCompositeEgress(roomName, {
-      file: {
-        filepath: filePath,
-        disableManifest: true,
+    const fileOutput = new EncodedFileOutput({
+      filepath: filePath,
+      output: {
         s3: {
           accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
           secret: envConfig.SUPABASE_S3_SECRET_KEY,
@@ -128,17 +125,25 @@ export const startRoomRecording = async (roomName) => {
           forcePathStyle: true,
         },
       },
+    });
+
+    const egress = await client.startRoomCompositeEgress(roomName, {
+      file: fileOutput,
       audioOnly: true,
+      encodingOptions: {
+        audioCodec: "AAC",
+        audioBitrate: 128,
+      },
     });
 
     console.log(
-      `🎙️  Recording started for room "${roomName}" → egress: ${egressInfo.egressId}`,
+      `🎙️ Recording started for room "${roomName}" — egress: ${egress.egressId}`,
     );
-    return egressInfo.egressId;
+
+    return egress.egressId;
   } catch (err) {
-    // Non-fatal — meeting still works without recording (AI pipeline won't trigger)
     console.warn(
-      `⚠️  startRoomRecording failed for "${roomName}": ${err.message}`,
+      `⚠️ Could not start recording for room "${roomName}": ${err.message}`,
     );
     return null;
   }
