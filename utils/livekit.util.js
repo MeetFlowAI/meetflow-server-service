@@ -17,7 +17,10 @@ import {
   RoomServiceClient,
   WebhookReceiver,
   EgressClient,
+  EncodedFileOutput,
 } from "livekit-server-sdk";
+
+import { S3Upload, EncodingOptions, AudioCodec } from "@livekit/protocol";
 import { envConfig } from "../config/env.config.js";
 
 const LK_URL = envConfig.LIVEKIT_URL;
@@ -109,37 +112,40 @@ export const startRoomRecording = async (roomName) => {
       "https://",
       "",
     )?.replace(".supabase.co", "");
-
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
     const filePath = `${roomName}/${Date.now()}.mp3`;
 
-    const fileOutput = new EncodedFileOutput({
-      filepath: filePath,
-      output: {
-        s3: {
-          accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
-          secret: envConfig.SUPABASE_S3_SECRET_KEY,
-          region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
-          endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
-          bucket,
-          forcePathStyle: true,
-        },
-      },
+    // S3Upload must be a class instance — plain objects won't serialize correctly
+    const s3 = new S3Upload({
+      accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
+      secret: envConfig.SUPABASE_S3_SECRET_KEY,
+      region: envConfig.SUPABASE_S3_REGION || "ap-southeast-1",
+      endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
+      bucket,
+      forcePathStyle: true,
     });
 
-    const egress = await client.startRoomCompositeEgress(roomName, {
-      file: fileOutput,
-      audioOnly: true,
-      encodingOptions: {
-        audioCodec: "AAC",
-        audioBitrate: 128,
-      },
+    // The S3 config goes inside output as a protobuf oneof: { case: 's3', value: s3 }
+    const fileOutput = new EncodedFileOutput({
+      filepath: filePath,
+      output: { case: "s3", value: s3 },
     });
+
+    const egress = await client.startRoomCompositeEgress(
+      roomName,
+      fileOutput, // pass EncodedFileOutput directly as the output arg
+      {
+        audioOnly: true,
+        encodingOptions: new EncodingOptions({
+          audioCodec: AudioCodec.AAC, // enum value 2, not the string "AAC"
+          audioBitrate: 128000, // bits/sec — NOT 128
+        }),
+      },
+    );
 
     console.log(
       `🎙️ Recording started for room "${roomName}" — egress: ${egress.egressId}`,
     );
-
     return egress.egressId;
   } catch (err) {
     console.warn(
@@ -194,10 +200,12 @@ export const stopRoomRecording = async (egressId, roomName) => {
         status === 3 || status === "EGRESS_COMPLETE" || String(status) === "3";
 
       const isFailed =
-        status >= 4 ||
+        status === 4 ||
+        status === 5 ||
+        status === 6 ||
         status === "EGRESS_FAILED" ||
         status === "EGRESS_ABORTED" ||
-        status === "EGRESS_ENDING";
+        status === "EGRESS_LIMIT_REACHED";
 
       if (isComplete) {
         const filePath =
