@@ -55,4 +55,12 @@ export const envConfig = {
   BACKEND_WEBHOOK_URL:
     process.env.BACKEND_WEBHOOK_URL ||
     "http://localhost:8000/api/v1/webhook/ai",
+
+  // ── Supabase ───────────────────────────────────────────────────────────────
+  SUPABASE_URL: process.env.SUPABASE_URL,
+  SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY,
+  SUPABASE_STORAGE_BUCKET: process.env.SUPABASE_STORAGE_BUCKET || "recordings",
+  SUPABASE_S3_ACCESS_KEY: process.env.SUPABASE_S3_ACCESS_KEY,
+  SUPABASE_S3_SECRET_KEY: process.env.SUPABASE_S3_SECRET_KEY,
+  SUPABASE_S3_REGION: process.env.SUPABASE_S3_REGION || "ap-southeast-1",
 };

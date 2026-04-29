@@ -27,6 +27,16 @@ const LK_URL = envConfig.LIVEKIT_URL;
 const LK_API_KEY = envConfig.LIVEKIT_API_KEY;
 const LK_API_SECRET = envConfig.LIVEKIT_API_SECRET;
 
+if (
+  !envConfig.SUPABASE_S3_ACCESS_KEY ||
+  !envConfig.SUPABASE_S3_SECRET_KEY ||
+  !envConfig.SUPABASE_URL
+) {
+  console.error(
+    "❌ FATAL: Supabase S3 env vars missing — recordings will fail. Check SUPABASE_URL, SUPABASE_S3_ACCESS_KEY, SUPABASE_S3_SECRET_KEY in .env",
+  );
+}
+
 // ─── Singletons ───────────────────────────────────────────────────────────────
 let _roomSvc = null;
 const getRoomService = () => {
