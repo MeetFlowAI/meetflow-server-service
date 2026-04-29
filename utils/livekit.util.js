@@ -172,8 +172,6 @@ export const startRoomRecording = async (roomName) => {
   try {
     const client = getEgressClient();
 
-    // Supabase S3-compatible endpoint
-    // Find yours: Supabase Dashboard → Storage → S3 Access
     const supabaseRef = envConfig.SUPABASE_URL?.replace(
       "https://",
       "",
@@ -182,22 +180,23 @@ export const startRoomRecording = async (roomName) => {
     const bucket = envConfig.SUPABASE_STORAGE_BUCKET || "recordings";
     const filePath = `${roomName}/${Date.now()}.mp3`;
 
-    const output = {
+    const fileOutput = new EncodedFileOutput({
       filepath: filePath,
-      disableManifest: true,
-      s3: {
-        accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
-        secret: envConfig.SUPABASE_S3_SECRET_KEY,
-        region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
-        endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
-        bucket,
-        forcePathStyle: true,
+      output: {
+        s3: {
+          accessKey: envConfig.SUPABASE_S3_ACCESS_KEY,
+          secret: envConfig.SUPABASE_S3_SECRET_KEY,
+          region: envConfig.SUPABASE_S3_REGION || "ap-south-1",
+          endpoint: `https://${supabaseRef}.supabase.co/storage/v1/s3`,
+          bucket,
+          forcePathStyle: true,
+        },
       },
-    };
+    });
 
     const egress = await client.startRoomCompositeEgress(roomName, {
-      file: output,
-      audioOnly: true, // MP3 audio-only — smaller file, faster upload, enough for AI
+      file: fileOutput,
+      audioOnly: true,
       encodingOptions: {
         audioCodec: "AAC",
         audioBitrate: 128,
@@ -205,13 +204,13 @@ export const startRoomRecording = async (roomName) => {
     });
 
     console.log(
-      `🎙️  Recording started for room "${roomName}" — egress: ${egress.egressId}`,
+      `🎙️ Recording started for room "${roomName}" — egress: ${egress.egressId}`,
     );
+
     return egress.egressId;
   } catch (err) {
-    // Non-fatal — meeting still works without recording
     console.warn(
-      `⚠️  Could not start recording for room "${roomName}": ${err.message}`,
+      `⚠️ Could not start recording for room "${roomName}": ${err.message}`,
     );
     return null;
   }
