@@ -167,7 +167,7 @@ export const startMeeting = async ({
       livekit_room_name: livekitRoomName,
       participant_count: 1,
       livekit_egress_id: egressId || null,
-      expected_recording_url: expectedUrl || null,
+      recording_url: expectedUrl || null,
     });
 
     // Record host as first participant
