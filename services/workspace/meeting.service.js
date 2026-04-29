@@ -359,15 +359,15 @@ export const endMeeting = async ({
       );
     }
 
-    // Delete the LiveKit room — kicks all participants immediately
-    await deleteLiveKitRoom(meeting.livekit_room_name);
-
-    // Stop egress recording — LiveKit finalises MP3 and uploads to Supabase
-    // This returns the public URL of the recording file
     const recordingUrl = await stopRoomRecording(
       meeting.livekit_egress_id,
       meeting.livekit_room_name,
     );
+
+    await deleteLiveKitRoom(meeting.livekit_room_name).catch((err) => {
+      // Room may already be empty/gone — non-fatal
+      console.warn(`⚠️ Could not delete LiveKit room: ${err.message}`);
+    });
 
     const endedAt = new Date();
 
