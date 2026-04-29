@@ -25,6 +25,9 @@ import { successResponse, errorResponse } from "../../utils/response.util.js";
 import { STATUS_CODES, RESPONSE_MESSAGES } from "../../constants/response.js";
 import * as WorkspaceRepository from "../../repositories/workspace/workspace.repository.js";
 import { envConfig } from "../../config/env.config.js";
+import FormDataLib from "form-data";
+import axios from "axios";
+import { convertToWav } from "../../utils/audio.util.js";
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -282,10 +285,9 @@ export const enrollVoice = async (req, res) => {
     }
 
     // Build FormData using the 'form-data' npm package.
-    // Node.js built-in FormData does NOT correctly serialise multiple files
-    // under the same field name when piped through fetch — the AI service
-    // ends up receiving only 1 file. form-data handles this correctly.
-    const FormDataLib = (await import("form-data")).default;
+    // Each webm clip is first converted to WAV 16kHz mono PCM so the AI service
+    // (pyannote/SpeechBrain) can open it. Browser MediaRecorder produces audio/webm
+    // which these ML libraries cannot parse directly.
     const formData = new FormDataLib();
 
     formData.append("name", `${user.first_name} ${user.last_name}`.trim());
@@ -293,20 +295,30 @@ export const enrollVoice = async (req, res) => {
     formData.append("role", wm?.role || "member");
     formData.append("external_id", String(userId));
 
-    // Append each clip as a separate audio_clips part
+    // Convert each clip webm → wav, fallback to original if ffmpeg fails
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
-      formData.append("audio_clips", file.buffer, {
-        filename: file.originalname || `clip_${i + 1}.webm`,
-        contentType: file.mimetype || "audio/webm",
-        knownLength: file.buffer.length,
+      let buffer = file.buffer;
+      let filename = `clip_${i + 1}.wav`;
+      let contentType = "audio/wav";
+
+      try {
+        buffer = await convertToWav(file.buffer, file.mimetype || "audio/webm");
+      } catch (convErr) {
+        console.warn(`⚠️  Clip ${i + 1} conversion failed, sending original: ${convErr.message}`);
+        filename = file.originalname || `clip_${i + 1}.webm`;
+        contentType = file.mimetype || "audio/webm";
+      }
+
+      formData.append("audio_clips", buffer, {
+        filename,
+        contentType,
+        knownLength: buffer.length,
       });
     }
 
-    // Use axios — it correctly pipes form-data streams to FastAPI.
-    // fetch + form-data causes "error parsing body" in FastAPI due to
-    // how Node's fetch handles the multipart stream internally.
-    const axios = (await import("axios")).default;
+    // Use axios — correctly pipes form-data streams to FastAPI.
+    // fetch + form-data causes "error parsing body" in FastAPI.
     const AI_BASE = envConfig.AI_SERVICE_URL;
     const AI_KEY = envConfig.AI_SERVICE_INTERNAL_KEY;
 
