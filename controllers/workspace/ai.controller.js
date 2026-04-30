@@ -28,6 +28,7 @@ import { envConfig } from "../../config/env.config.js";
 import FormDataLib from "form-data";
 import axios from "axios";
 import { convertToWav } from "../../utils/audio.util.js";
+import * as MeetingRepository from "../../repositories/workspace/meeting.repository.js";
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
