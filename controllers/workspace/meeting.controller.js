@@ -8,6 +8,10 @@
 import * as MeetingService from "../../services/workspace/meeting.service.js";
 import { successResponse, errorResponse } from "../../utils/response.util.js";
 import { STATUS_CODES, RESPONSE_MESSAGES } from "../../constants/response.js";
+import * as MeetingRepository from "../../repositories/workspace/meeting.repository.js";
+
+// SSE client registry: meetingId (string) → Set of res objects
+export const sseClients = new Map();
 
 // POST /workspace/:workspaceId/channels/:channelId/meetings/start
 export const startMeeting = async (req, res) => {
@@ -150,4 +154,50 @@ export const getMeetingDetail = async (req, res) => {
       err,
     );
   }
+};
+
+// GET /workspace/:workspaceId/channels/:channelId/meetings/:meetingId/status-stream
+export const meetingStatusStream = async (req, res) => {
+  const { meetingId } = req.params;
+  const tenantSchema = req.user.tenantSchema;
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  // Register client
+  if (!sseClients.has(meetingId)) sseClients.set(meetingId, new Set());
+  sseClients.get(meetingId).add(res);
+
+  // Send current state immediately so frontend doesn't wait for next event
+  try {
+    const meeting = await MeetingRepository.getMeetingById(
+      tenantSchema,
+      meetingId,
+    );
+    if (meeting) {
+      res.write(
+        `data: ${JSON.stringify({
+          ai_status: meeting.ai_status,
+          ai_stage: meeting.ai_stage,
+        })}\n\n`,
+      );
+    }
+  } catch {}
+
+  // Heartbeat every 25s to prevent proxy timeouts
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(": heartbeat\n\n");
+    } catch {}
+  }, 25000);
+
+  // Cleanup on disconnect
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    sseClients.get(meetingId)?.delete(res);
+    if (sseClients.get(meetingId)?.size === 0) sseClients.delete(meetingId);
+  });
 };

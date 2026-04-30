@@ -73,6 +73,11 @@ export const MeetingModel = (sequelize, DataTypes, options = {}) => {
         defaultValue: "not_triggered",
         allowNull: false,
       },
+      ai_stage: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        defaultValue: null,
+      },
       // Type of meeting — sent to AI for context-aware processing
       meeting_type: {
         type: DataTypes.STRING(50),

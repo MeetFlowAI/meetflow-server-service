@@ -439,6 +439,7 @@ export const endMeeting = async ({
         await MeetingRepository.updateMeeting(tenantSchema, meetingId, {
           ai_meeting_id: aiResult.meeting_id,
           ai_status: "processing",
+          ai_stage: "transcription",
         });
 
         console.log(
@@ -633,6 +634,7 @@ const formatMeeting = (m) => ({
   livekit_egress_id: m.livekit_egress_id || null,
   meeting_type: m.meeting_type || "general",
   ai_status: m.ai_status || "not_triggered",
+  ai_stage: m.ai_stage || null,
   ai_meeting_id: m.ai_meeting_id || null,
   recording_url: m.recording_url || null,
   created_at: m.createdAt,
