@@ -46,9 +46,10 @@ MeetingRoutes.get(
   MeetingController.getMeetingDetail,
 );
 
-// ── Public SSE route — no auth ────────────────────────────────────────────────
 MeetingRoutes.get(
   "/:meetingId/status-stream",
+  authenticate,
+  requireOrgContext,
   MeetingController.meetingStatusStream,
 );
 

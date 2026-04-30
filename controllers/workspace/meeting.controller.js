@@ -167,11 +167,10 @@ export const meetingStatusStream = async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  // Register client
   if (!sseClients.has(meetingId)) sseClients.set(meetingId, new Set());
   sseClients.get(meetingId).add(res);
 
-  // Send current state immediately so frontend doesn't wait for next event
+  // Send current state immediately on connect
   try {
     const meeting = await MeetingRepository.getMeetingById(
       tenantSchema,
@@ -187,14 +186,12 @@ export const meetingStatusStream = async (req, res) => {
     }
   } catch {}
 
-  // Heartbeat every 25s to prevent proxy timeouts
   const heartbeat = setInterval(() => {
     try {
       res.write(": heartbeat\n\n");
     } catch {}
   }, 25000);
 
-  // Cleanup on disconnect
   req.on("close", () => {
     clearInterval(heartbeat);
     sseClients.get(meetingId)?.delete(res);
