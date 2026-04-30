@@ -19,6 +19,12 @@ import { startMeetingSchema } from "../../validators/workspace/meeting.validator
 
 const MeetingRoutes = Router({ mergeParams: true });
 
+// ── Public SSE route (no auth) ────────────────────────────────────────────────
+MeetingRoutes.get(
+  "/:meetingId/status-stream",
+  MeetingController.meetingStatusStream,
+);
+
 // All meeting routes require a valid org JWT
 MeetingRoutes.use(authenticate, requireOrgContext);
 
@@ -45,9 +51,9 @@ MeetingRoutes.get("/", MeetingController.getMeetings);
 // Get full meeting detail including participant list
 MeetingRoutes.get("/:meetingId", MeetingController.getMeetingDetail);
 
-MeetingRoutes.get(
-  "/:meetingId/status-stream",
-  MeetingController.meetingStatusStream,
-);
+// MeetingRoutes.get(
+//   "/:meetingId/status-stream",
+//   MeetingController.meetingStatusStream,
+// );
 
 export default MeetingRoutes;
