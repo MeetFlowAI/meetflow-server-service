@@ -28,7 +28,7 @@ const verify = (rawBody, sig, secret) => {
     // that may pass or fail depending on string content — not cryptographically safe.
     return crypto.timingSafeEqual(
       Buffer.from(expected, "hex"),
-      Buffer.from(sig, "hex")
+      Buffer.from(sig, "hex"),
     );
   } catch {
     return false;
@@ -36,13 +36,22 @@ const verify = (rawBody, sig, secret) => {
 };
 
 // ─── Event → ai_status mapping ────────────────────────────────────────────────
-const EVENT_TO_STATUS = {
-  "transcription.completed": "processing",
-  "speakers.identified":     "processing",
-  "tasks.ready_for_review":  "pending_review",
-  "review.completed":        "processing",
-  "processing.completed":    "completed",
-  "processing.failed":       "failed",
+const EVENT_TO_UPDATE = {
+  "transcription.completed": {
+    ai_status: "processing",
+    ai_stage: "speaker_identification",
+  },
+  "speakers.identified": {
+    ai_status: "processing",
+    ai_stage: "task_extraction",
+  },
+  "tasks.ready_for_review": {
+    ai_status: "pending_review",
+    ai_stage: "pending_review",
+  },
+  "review.completed": { ai_status: "processing", ai_stage: "summarization" },
+  "processing.completed": { ai_status: "completed", ai_stage: "completed" },
+  "processing.failed": { ai_status: "failed", ai_stage: "failed" },
 };
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -70,11 +79,7 @@ export const aiWebhookHandler = async (req, res) => {
       return;
     }
 
-    const {
-      event_type,
-      external_id,
-      meeting_id: aiMeetingId,
-    } = req.body;
+    const { event_type, external_id, meeting_id: aiMeetingId } = req.body;
 
     if (!external_id) {
       console.warn("⚠️ AI webhook: missing external_id — cannot route");
@@ -91,35 +96,48 @@ export const aiWebhookHandler = async (req, res) => {
     const tenantSchema = external_id.substring(0, separatorIdx);
     const backendMeetingId = parseInt(
       external_id.substring(separatorIdx + 2),
-      10
+      10,
     );
 
     if (!tenantSchema || isNaN(backendMeetingId)) {
-      console.warn(`⚠️ AI webhook: could not parse external_id "${external_id}"`);
+      console.warn(
+        `⚠️ AI webhook: could not parse external_id "${external_id}"`,
+      );
       return;
     }
 
-    const newAiStatus = EVENT_TO_STATUS[event_type];
-    if (!newAiStatus) {
+    const updatePayload = EVENT_TO_UPDATE[event_type];
+    if (!updatePayload) {
       console.log(`ℹ️ AI webhook: unhandled event "${event_type}" — skipping`);
       return;
     }
 
     const db = initTenantModels(tenantSchema);
-    const [rowsUpdated] = await db.Meeting.update(
-      { ai_status: newAiStatus },
-      { where: { id: backendMeetingId } }
-    );
+    const [rowsUpdated] = await db.Meeting.update(updatePayload, {
+      where: { id: backendMeetingId },
+    });
+
+    // Push real-time update to any open SSE connections
+    const { sseClients } = await import("../workspace/meeting.controller.js");
+    const clients = sseClients.get(String(backendMeetingId));
+    if (clients?.size > 0) {
+      const payload = `data: ${JSON.stringify(updatePayload)}\n\n`;
+      for (const client of clients) {
+        try {
+          client.write(payload);
+        } catch {}
+      }
+    }
 
     if (rowsUpdated === 0) {
       console.warn(
-        `⚠️ AI webhook: meeting ${backendMeetingId} not found in schema "${tenantSchema}"`
+        `⚠️ AI webhook: meeting ${backendMeetingId} not found in schema "${tenantSchema}"`,
       );
       return;
     }
 
     console.log(
-      `🔔 AI webhook: meeting ${backendMeetingId} → ai_status="${newAiStatus}" (${event_type})`
+      `🔔 AI webhook: meeting ${backendMeetingId} → ai_status="${updatePayload.ai_status}" stage="${updatePayload.ai_stage}" (${event_type})`,
     );
   } catch (err) {
     console.error("❌ AI webhook processing error:", err.message);

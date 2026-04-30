@@ -45,4 +45,9 @@ MeetingRoutes.get("/", MeetingController.getMeetings);
 // Get full meeting detail including participant list
 MeetingRoutes.get("/:meetingId", MeetingController.getMeetingDetail);
 
+MeetingRoutes.get(
+  "/:meetingId/status-stream",
+  MeetingController.meetingStatusStream,
+);
+
 export default MeetingRoutes;
