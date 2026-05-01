@@ -30,7 +30,18 @@ app.use(
   }),
 );
 
-app.use(express.json({ limit: "10mb" }));
+// Capture raw body for webhook HMAC verification BEFORE json parsing consumes the stream.
+// The verify callback runs synchronously during body parsing and stores the raw bytes.
+// Without this, req.on("data") in webhook routes fires after stream is already consumed
+// causing a 30-second hang until the AI service's httpx ReadTimeout.
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString("utf8");
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ── Swagger UI ─────────────────────────────────────────────────────────────────

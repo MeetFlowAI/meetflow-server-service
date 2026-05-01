@@ -3,25 +3,8 @@ import { aiWebhookHandler } from "../../controllers/webhook/ai.controller.js";
 
 const AIWebhookRoutes = Router();
 
-AIWebhookRoutes.post(
-  "/",
-  // Capture raw body for HMAC verification
-  (req, res, next) => {
-    let rawData = "";
-    req.on("data", (chunk) => {
-      rawData += chunk.toString();
-    });
-    req.on("end", () => {
-      req.rawBody = rawData;
-      try {
-        req.body = JSON.parse(rawData);
-      } catch {
-        req.body = {};
-      }
-      next();
-    });
-  },
-  aiWebhookHandler,
-);
+// rawBody is now set by the global express.json verify callback in app.lib.js
+// No need to manually capture the stream here
+AIWebhookRoutes.post("/", aiWebhookHandler);
 
 export default AIWebhookRoutes;
