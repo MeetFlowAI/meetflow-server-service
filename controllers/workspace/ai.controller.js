@@ -28,6 +28,7 @@ import { envConfig } from "../../config/env.config.js";
 import FormDataLib from "form-data";
 import axios from "axios";
 import { convertToWav } from "../../utils/audio.util.js";
+import * as MeetingRepository from "../../repositories/workspace/meeting.repository.js";
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -46,9 +47,9 @@ const getMeetingWithAI = async (tenantSchema, meetingId) => {
     throw Object.assign(
       new Error(
         "AI processing has not been triggered for this meeting. " +
-          "The meeting may not have a recording yet."
+          "The meeting may not have a recording yet.",
       ),
-      { statusCode: 404 }
+      { statusCode: 404 },
     );
   }
   return meeting;
@@ -58,30 +59,23 @@ const getMeetingWithAI = async (tenantSchema, meetingId) => {
 
 export const getAIStatus = async (req, res) => {
   try {
-    const { meetingId } = req.params;
-    const { tenantSchema } = req.user;
-
-    const meeting = await getMeetingWithAI(tenantSchema, meetingId);
-    const pipeline = await getAIPipelineStatus(meeting.ai_meeting_id);
-
+    const meeting = await MeetingRepository.getMeetingById(
+      req.user.tenantSchema,
+      req.params.meetingId,
+    );
     return successResponse(
       res,
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
-      "AI status retrieved",
+      "OK",
       {
-        ai_status: meeting.ai_status,
-        ai_meeting_id: meeting.ai_meeting_id,
-        pipeline,
-      }
+        ai_status: meeting?.ai_status ?? "not_triggered",
+        ai_stage: meeting?.ai_stage ?? null, // ← add this
+        ai_meeting_id: meeting?.ai_meeting_id ?? null,
+      },
     );
   } catch (err) {
-    return errorResponse(
-      res,
-      err.statusCode || STATUS_CODES.SERVER_ERROR,
-      RESPONSE_MESSAGES.ERROR,
-      err.message
-    );
+    return errorResponse(res, 500, RESPONSE_MESSAGES.ERROR, err.message, err);
   }
 };
 
@@ -99,7 +93,7 @@ export const getAITasks = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Tasks are not ready yet. Current AI status: '${meeting.ai_status}'.`
+        `Tasks are not ready yet. Current AI status: '${meeting.ai_status}'.`,
       );
     }
 
@@ -109,14 +103,14 @@ export const getAITasks = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Tasks retrieved successfully",
-      tasks
+      tasks,
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message
+      err.message,
     );
   }
 };
@@ -135,7 +129,7 @@ export const submitAIMeetingReview = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Cannot submit review. AI status is '${meeting.ai_status}', expected 'pending_review'.`
+        `Cannot submit review. AI status is '${meeting.ai_status}', expected 'pending_review'.`,
       );
     }
 
@@ -149,14 +143,14 @@ export const submitAIMeetingReview = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Review submitted successfully. Summary generation has started.",
-      result
+      result,
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message
+      err.message,
     );
   }
 };
@@ -176,14 +170,14 @@ export const getAITranscript = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Transcript retrieved successfully",
-      transcript
+      transcript,
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message
+      err.message,
     );
   }
 };
@@ -202,7 +196,7 @@ export const getAISummary = async (req, res) => {
         res,
         STATUS_CODES.CONFLICT,
         RESPONSE_MESSAGES.ERROR,
-        `Summary is not available yet. Current AI status: '${meeting.ai_status}'.`
+        `Summary is not available yet. Current AI status: '${meeting.ai_status}'.`,
       );
     }
 
@@ -212,14 +206,14 @@ export const getAISummary = async (req, res) => {
       STATUS_CODES.OK,
       RESPONSE_MESSAGES.SUCCESS,
       "Summary retrieved successfully",
-      summary
+      summary,
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message
+      err.message,
     );
   }
 };
@@ -236,14 +230,14 @@ export const enrollVoice = async (req, res) => {
     // Get workspace — need ai_channel_id
     const workspace = await WorkspaceRepository.getWorkspaceById(
       tenantSchema,
-      workspaceId
+      workspaceId,
     );
     if (!workspace) {
       return errorResponse(
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "Workspace not found."
+        "Workspace not found.",
       );
     }
     if (!workspace.ai_channel_id) {
@@ -251,7 +245,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "AI context has not been provisioned for this workspace yet. Please try again in a few moments."
+        "AI context has not been provisioned for this workspace yet. Please try again in a few moments.",
       );
     }
 
@@ -265,7 +259,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.NOT_FOUND,
         RESPONSE_MESSAGES.ERROR,
-        "User not found."
+        "User not found.",
       );
     }
 
@@ -280,7 +274,7 @@ export const enrollVoice = async (req, res) => {
         res,
         STATUS_CODES.BAD_REQUEST,
         RESPONSE_MESSAGES.BAD_REQUEST,
-        "At least 1 audio clip is required. Please provide 3–5 clips for best accuracy."
+        "At least 1 audio clip is required. Please provide 3–5 clips for best accuracy.",
       );
     }
 
@@ -305,7 +299,9 @@ export const enrollVoice = async (req, res) => {
       try {
         buffer = await convertToWav(file.buffer, file.mimetype || "audio/webm");
       } catch (convErr) {
-        console.warn(`⚠️  Clip ${i + 1} conversion failed, sending original: ${convErr.message}`);
+        console.warn(
+          `⚠️  Clip ${i + 1} conversion failed, sending original: ${convErr.message}`,
+        );
         filename = file.originalname || `clip_${i + 1}.webm`;
         contentType = file.mimetype || "audio/webm";
       }
@@ -355,7 +351,7 @@ export const enrollVoice = async (req, res) => {
         ai_participant_id: result.participant_id,
         voice_enrolled: true,
       },
-      { where: { workspace_id: workspaceId, user_id: userId } }
+      { where: { workspace_id: workspaceId, user_id: userId } },
     );
 
     return successResponse(
@@ -368,14 +364,14 @@ export const enrollVoice = async (req, res) => {
         status: result.status,
         quality_score: result.enrollment_quality_score,
         issues: result.issues || [],
-      }
+      },
     );
   } catch (err) {
     return errorResponse(
       res,
       err.statusCode || STATUS_CODES.SERVER_ERROR,
       RESPONSE_MESSAGES.ERROR,
-      err.message
+      err.message,
     );
   }
 };
