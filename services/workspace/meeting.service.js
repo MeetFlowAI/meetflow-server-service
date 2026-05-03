@@ -377,6 +377,11 @@ export const endMeeting = async ({
       {
         status: "ended",
         ended_at: endedAt,
+        // Set AI status immediately so frontend knows pipeline is starting.
+        // setImmediate will overwrite ai_meeting_id once AI service responds,
+        // but ai_status="processing" must be visible before the response goes out.
+        ai_status: "processing",
+        ai_stage: "transcription",
       },
     );
 
@@ -438,8 +443,8 @@ export const endMeeting = async ({
 
         await MeetingRepository.updateMeeting(tenantSchema, meetingId, {
           ai_meeting_id: aiResult.meeting_id,
-          ai_status: "processing",
-          ai_stage: "transcription",
+          // ai_status: "processing",
+          // ai_stage: "transcription",
         });
 
         console.log(
