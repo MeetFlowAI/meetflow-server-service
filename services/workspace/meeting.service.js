@@ -194,9 +194,7 @@ export const startMeeting = async ({
       roomName: livekitRoomName,
       identity: String(userId),
       participantName,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true,
+      isHost: true,
     });
 
     return {
@@ -286,9 +284,7 @@ export const joinMeeting = async ({
       roomName: meeting.livekit_room_name,
       identity: String(userId),
       participantName,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true,
+      isHost: false,
     });
 
     return {
