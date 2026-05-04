@@ -80,11 +80,22 @@ export const getLiveKitParticipants = async (roomName) => {
 export const generateJoinToken = ({
   roomName,
   participantName,
+  // Accept either `participantId` (old callers) or `identity` (new callers).
+  // Previously the service passed `identity` but this function only destructured
+  // `participantId`, so it was always undefined → String("undefined") → every
+  // participant shared the same identity → LiveKit kicked the previous user on join.
   participantId,
+  identity,
   isHost = false,
 }) => {
+  const resolvedIdentity = identity ?? participantId;
+  if (!resolvedIdentity) {
+    throw new Error(
+      "generateJoinToken: either `identity` or `participantId` must be provided",
+    );
+  }
   const at = new AccessToken(LK_API_KEY, LK_API_SECRET, {
-    identity: String(participantId),
+    identity: String(resolvedIdentity),
     name: participantName,
     ttl: "4h",
   });
