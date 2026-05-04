@@ -54,18 +54,20 @@ export const getTasksByChannel = async (
     where,
     include: withIncludes(db),
     order: [
-      // Pinned ordering: todo first, then in_progress, then done
-      [
-        db.sequelize.literal(
-          `CASE status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END`,
-        ),
-        "ASC",
-      ],
+      ["status", "ASC"], // todo < in_progress < done alphabetically doesn't work, so we use separate sort below
       ["created_at", "DESC"],
     ],
     offset: skip,
     limit,
   });
+
+  // Sort in JS: todo → in_progress → done
+  const STATUS_ORDER = { todo: 0, in_progress: 1, done: 2 };
+  rows.sort(
+    (a, b) =>
+      (STATUS_ORDER[a.status] ?? 0) - (STATUS_ORDER[b.status] ?? 0) ||
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
 
   return { count, rows };
 };
