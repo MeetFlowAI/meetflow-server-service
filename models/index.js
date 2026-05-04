@@ -43,6 +43,7 @@ import ChannelModel from "./workspace/channel.model.js";
 import ChannelMemberModel from "./workspace/channelMember.model.js";
 import MeetingModel from "./workspace/meeting.model.js";
 import MeetingParticipantModel from "./workspace/meetingParticipant.model.js";
+import TaskModel from "./workspace/task.model.js";
 
 import { runMasterSeeders } from "../seeders/index.js";
 
@@ -131,6 +132,7 @@ const initTenantModels = (schema) => {
     DataTypes,
     options,
   );
+  tenantDb.Task = TaskModel(sequelize, DataTypes, options);
 
   // Apply tenant associations
   applyTenantAssociations(tenantDb);
@@ -153,6 +155,7 @@ const applyTenantAssociations = (db) => {
     PlanLimitUsage,
     Meeting,
     MeetingParticipant,
+    Task,
   } = db;
 
   // User ↔ Role
@@ -224,6 +227,26 @@ const applyTenantAssociations = (db) => {
     as: "participant",
   });
   User.hasMany(MeetingParticipant, { foreignKey: "user_id" });
+
+  // Task → Channel
+  Task.belongsTo(Channel, { foreignKey: "channel_id" });
+  Channel.hasMany(Task, { foreignKey: "channel_id" });
+
+  // Task → Workspace
+  Task.belongsTo(Workspace, { foreignKey: "workspace_id" });
+  Workspace.hasMany(Task, { foreignKey: "workspace_id" });
+
+  // Task → Meeting (optional — AI-sourced tasks link back to the meeting)
+  Task.belongsTo(Meeting, { foreignKey: "meeting_id", as: "meeting" });
+  Meeting.hasMany(Task, { foreignKey: "meeting_id" });
+
+  // Task → User (assignee)
+  Task.belongsTo(User, { foreignKey: "assigned_to_id", as: "assignee" });
+  User.hasMany(Task, { foreignKey: "assigned_to_id" });
+
+  // Task → User (creator)
+  Task.belongsTo(User, { foreignKey: "created_by_id", as: "creator" });
+  User.hasMany(Task, { foreignKey: "created_by_id" });
 };
 
 // ===============================================================
@@ -260,6 +283,8 @@ const provisionTenantSchema = async (schemaName) => {
   // Meeting must sync AFTER Channel and Workspace (foreign keys)
   await tenantDb.Meeting.sync(syncOptions);
   await tenantDb.MeetingParticipant.sync(syncOptions);
+  // Task syncs after Meeting (optional FK) and Channel/Workspace
+  await tenantDb.Task.sync(syncOptions);
 
   console.log(`✅ Tables synced for tenant: ${schemaName}`);
 
