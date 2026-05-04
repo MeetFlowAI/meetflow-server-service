@@ -11,8 +11,10 @@ const app = express();
 // ── CORS ──────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   envConfig.FRONTEND_SERVICE_LOCAL_URL,
+  envConfig.FRONTEND_SERVICE_DEV_URL,
   envConfig.FRONTEND_SERVICE_PROD_URL,
   envConfig.BACKEND_SERVICE_LOCAL_URL,
+  envConfig.BACKEND_SERVICE_DEV_URL,
   envConfig.BACKEND_SERVICE_PROD_URL,
 ].filter(Boolean);
 
