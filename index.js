@@ -1,13 +1,12 @@
 /**
  * @file     index.js
  * @desc     Server entry point.
- *           Phase 1 update: process.env.PORT replaced with envConfig.PORT.
- *           envConfig validates all env vars at startup — server exits if
- *           any required variable is missing (fail-fast pattern).
+ *           Phase 2 update:
+ *             - console.log replaced with logger.info (TODO resolved)
+ *             - process.on unhandledRejection/uncaughtException moved
+ *               into logger.util.js where logger is instantiated
  *
  *           Remaining TODOs resolved in future phases:
- *             Phase 2  → replace console.log with logger.info
- *             Phase 2  → add process.on('unhandledRejection') handler
  *             Phase 5  → add initializeDatabase() call before listen
  *             Phase 24 → add graceful shutdown (SIGTERM/SIGINT handlers)
  *
@@ -15,17 +14,19 @@
  * @created  2026-05-03
  */
 
-// envConfig must be imported first — it validates all env vars before
-// anything else runs, ensuring the server fails fast with a clear message
-// rather than crashing later with a cryptic undefined reference.
+// envConfig must be imported first — validates env vars before anything else.
+// logger must be imported second — registers process-level error handlers.
 import { envConfig } from "./src/config/env.config.js";
+import { logger } from "./src/utils/logger.util.js";
 import app from "./src/app.js";
 
 const PORT = envConfig.PORT;
 
+// TODO Phase 5: await initializeDatabase() before app.listen()
+
 app.listen(PORT, "0.0.0.0", () => {
-  // TODO Phase 2: replace with logger.info({ port: PORT, env: envConfig.NODE_ENV }, 'Server started')
-  console.log(
-    `🚀 MeetFlow Server running on port ${PORT} [${envConfig.NODE_ENV}]`,
+  logger.info(
+    { port: PORT, env: envConfig.NODE_ENV },
+    "🚀 MeetFlow Server started",
   );
 });
