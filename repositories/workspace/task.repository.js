@@ -42,13 +42,24 @@ export const getTaskById = async (schema, taskId) => {
 export const getTasksByChannel = async (
   schema,
   channelId,
-  { skip = 0, limit = 50, status, priority } = {},
+  { skip = 0, limit = 50, status, priority, search } = {},
 ) => {
   const db = initTenantModels(schema);
 
   const where = { channel_id: channelId };
   if (status) where.status = status;
   if (priority) where.priority = priority;
+  if (search) {
+    const searchOp = db.sequelize.getDialect() === "postgres" ? Op.iLike : Op.like;
+    where[Op.and] = [
+      {
+        [Op.or]: [
+          { title: { [searchOp]: `%${search}%` } },
+          { description: { [searchOp]: `%${search}%` } },
+        ],
+      },
+    ];
+  }
 
   const { count, rows } = await db.Task.findAndCountAll({
     where,

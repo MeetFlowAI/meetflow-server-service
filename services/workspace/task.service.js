@@ -111,6 +111,7 @@ export const getTasks = async ({
   limit,
   status,
   priority,
+  search,
 }) => {
   try {
     const membership = await WorkspaceMemberRepository.getWorkspaceMember(
@@ -130,6 +131,7 @@ export const getTasks = async ({
       limit,
       status,
       priority,
+      search,
     });
   } catch (err) {
     throw { statusCode: err.statusCode || 500, message: err.message };

@@ -44,7 +44,7 @@ export const createTask = async (req, res) => {
 // GET /workspace/:workspaceId/channels/:channelId/tasks
 export const getTasks = async (req, res) => {
   try {
-    const { skip = 0, limit = 50, status, priority } = req.query;
+    const { skip = 0, limit = 50, status, priority, search } = req.query;
     const data = await TaskService.getTasks({
       tenantSchema: req.user.tenantSchema,
       workspaceId: req.params.workspaceId,
@@ -54,6 +54,7 @@ export const getTasks = async (req, res) => {
       limit: parseInt(limit),
       status: status || undefined,
       priority: priority || undefined,
+      search: search?.toString().trim() || undefined,
     });
     return successResponse(
       res,
